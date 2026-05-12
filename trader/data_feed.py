@@ -33,13 +33,33 @@ class DataFeed:
         return handler
 
     async def start(self) -> None:
-        handler = self._make_handler()
-        self._stream.subscribe_bars(handler, *self._symbols)
-        log.info(f"DataFeed: subscribing to bars for {self._symbols}")
-        # run() calls asyncio.run() internally, so we must offload to a thread
-        # to avoid "cannot run nested event loop" when called from async context.
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._stream.run)
+        handler = self._make_handler()
+        max_retries = 10
+        backoff = 5  # seconds
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._stream = StockDataStream(
+                    os.getenv("ALPACA_API_KEY", ""),
+                    os.getenv("ALPACA_SECRET_KEY", ""),
+                )
+                self._stream.subscribe_bars(handler, *self._symbols)
+                log.info(f"DataFeed: subscribing to {self._symbols} (attempt {attempt})")
+                await loop.run_in_executor(None, self._stream.run)
+                # stream.run() returned cleanly — session ended normally
+                return
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                log.error(f"DataFeed: stream error — {exc}")
+                if attempt < max_retries:
+                    wait = backoff * attempt
+                    log.info(f"DataFeed: reconnecting in {wait}s (attempt {attempt}/{max_retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    log.error("DataFeed: max retries reached, giving up")
+                    raise
 
     async def stop(self) -> None:
         try:

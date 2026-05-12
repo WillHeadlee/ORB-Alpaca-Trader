@@ -139,29 +139,37 @@ def get_status(db: Session = Depends(get_db), username: str = Depends(verify_tok
     except Exception:
         bot_status = 'unknown'
 
-    positions = db.query(Position).all()
-
     today = date.today()
     today_trades = db.query(Trade).filter(func.date(Trade.timestamp) == today).all()
     today_pnl = sum(float(t.pnl or 0) for t in today_trades)
 
-    account_balance = _get_alpaca_balance()
-    mode = "paper" if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else "live"
+    # Fetch live positions and balance directly from Alpaca
+    try:
+        client = _alpaca_client()
+        account = client.get_account()
+        account_balance = float(account.equity)
+        mode = "paper" if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else "live"
+        alpaca_positions = client.get_all_positions()
+        positions = [
+            {
+                "symbol": p.symbol,
+                "quantity": int(p.qty),
+                "entry_price": float(p.avg_entry_price),
+                "current_price": float(p.current_price),
+                "unrealized_pnl": float(p.unrealized_pl),
+                "entry_time": None,
+            }
+            for p in alpaca_positions
+        ]
+    except Exception:
+        account_balance = 0.0
+        mode = "paper"
+        positions = []
 
     return {
         "bot_status": bot_status,
         "mode": mode,
-        "positions": [
-            {
-                "symbol": p.symbol,
-                "quantity": p.quantity,
-                "entry_price": float(p.entry_price),
-                "current_price": float(p.current_price or p.entry_price),
-                "unrealized_pnl": float(p.unrealized_pnl or 0),
-                "entry_time": p.entry_time.isoformat(),
-            }
-            for p in positions
-        ],
+        "positions": positions,
         "today_pnl": today_pnl,
         "account_balance": account_balance,
     }
