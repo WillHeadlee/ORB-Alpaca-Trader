@@ -6,10 +6,24 @@ from typing import Optional
 import subprocess
 import os
 
+from alpaca.trading.client import TradingClient
+
 from backend.database import get_db
 from backend.models import Trade, Position, DailySummary, ScreenerResult, User, SystemLog
 from backend.auth import verify_password, create_access_token, get_password_hash, verify_token
 from utils.email_alerts import send_alert
+
+def _get_alpaca_balance() -> float:
+    try:
+        client = TradingClient(
+            os.getenv('ALPACA_API_KEY'),
+            os.getenv('ALPACA_SECRET_KEY'),
+            paper=os.getenv('ALPACA_PAPER', 'true').lower() != 'false',
+        )
+        account = client.get_account()
+        return float(account.equity)
+    except Exception:
+        return 0.0
 
 router = APIRouter()
 
@@ -44,8 +58,8 @@ def get_status(db: Session = Depends(get_db), username: str = Depends(verify_tok
     today_trades = db.query(Trade).filter(func.date(Trade.timestamp) == today).all()
     today_pnl = sum(float(t.pnl or 0) for t in today_trades)
 
-    account_balance = 10000.00  # TODO: fetch from Alpaca API
-    mode = "paper"              # TODO: read from config.yaml
+    account_balance = _get_alpaca_balance()
+    mode = "paper" if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else "live"
 
     return {
         "bot_status": bot_status,
