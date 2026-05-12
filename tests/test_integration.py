@@ -98,15 +98,18 @@ STOP_LOSS = ENTRY_PRICE * (1 - 0.005)    # ~448.75
 TAKE_PROFIT = ENTRY_PRICE + (ENTRY_PRICE - STOP_LOSS) * 2.0  # ~455.50
 
 
-def make_session() -> tuple["SessionManager", "MockAlpacaClient"]:
-    """Create a SessionManager with a MockAlpacaClient, no DB or network needed."""
+import pytest
+
+@pytest.fixture
+def session():
+    """SessionManager with MockAlpacaClient; patches active for the whole test."""
     mock_client = MockAlpacaClient()
     with patch('trader.session_manager.AlpacaClient', return_value=mock_client), \
          patch('trader.session_manager._load_screener_watchlist', return_value=[]), \
          patch('trader.session_manager.log_trade'), \
          patch('trader.session_manager.save_daily_summary'):
         manager = SessionManager(TEST_CONFIG)
-    return manager, mock_client
+        yield manager, mock_client
 
 
 def run(coro):
@@ -131,8 +134,8 @@ def finalise_orb(manager: "SessionManager") -> None:
 
 class TestSessionManagerIntegration:
 
-    def test_orb_range_builds_correctly(self):
-        manager, _ = make_session()
+    def test_orb_range_builds_correctly(self, session):
+        manager, _ = session
         run(manager._on_bar("SPY", FakeBar("SPY", close=447.0, volume=1000, high=450.0, low=445.0)))
         run(manager._on_bar("SPY", FakeBar("SPY", close=448.0, volume=1000, high=449.0, low=445.5)))
         run(manager._on_bar("SPY", FakeBar("SPY", close=446.0, volume=1000, high=448.0, low=444.0)))
@@ -142,21 +145,21 @@ class TestSessionManagerIntegration:
         assert orb.range_low == 444.0
         assert manager._orb_done is False
 
-    def test_no_entry_before_orb_done(self):
-        manager, mock = make_session()
+    def test_no_entry_before_orb_done(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         assert len(mock.bracket_buys) == 0
 
-    def test_no_entry_inside_range(self):
-        manager, mock = make_session()
+    def test_no_entry_inside_range(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
         for _ in range(5):
             run(manager._on_bar("SPY", FakeBar("SPY", close=447.5, volume=ORB_BASE_VOL * 2)))
         assert len(mock.bracket_buys) == 0
 
-    def test_breakout_triggers_entry(self):
-        manager, mock = make_session()
+    def test_breakout_triggers_entry(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
 
@@ -172,12 +175,11 @@ class TestSessionManagerIntegration:
         assert order["stop_loss"] < ENTRY_PRICE
         assert order["take_profit"] > ENTRY_PRICE
 
-    def test_low_volume_breakout_skipped(self):
-        manager, mock = make_session()
+    def test_low_volume_breakout_skipped(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
 
-        # Volume below 1.2× ORB avg (need > 1200; use 500)
         run(manager._on_bar("SPY", FakeBar(
             "SPY", close=ENTRY_PRICE, volume=500,
             high=452.0, low=450.5,
@@ -185,8 +187,8 @@ class TestSessionManagerIntegration:
 
         assert len(mock.bracket_buys) == 0
 
-    def test_stop_loss_triggers_exit(self):
-        manager, mock = make_session()
+    def test_stop_loss_triggers_exit(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
 
@@ -196,7 +198,6 @@ class TestSessionManagerIntegration:
         )))
         assert len(mock.bracket_buys) == 1
 
-        # Price below stop loss
         below_stop = STOP_LOSS - 0.50
         run(manager._on_bar("SPY", FakeBar(
             "SPY", close=below_stop, volume=500,
@@ -206,8 +207,8 @@ class TestSessionManagerIntegration:
         assert len(mock.market_sells) == 1
         assert not manager.pos_tracker.is_open("SPY")
 
-    def test_take_profit_triggers_exit(self):
-        manager, mock = make_session()
+    def test_take_profit_triggers_exit(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
 
@@ -217,7 +218,6 @@ class TestSessionManagerIntegration:
         )))
         assert len(mock.bracket_buys) == 1
 
-        # Price above take profit
         above_tp = TAKE_PROFIT + 0.50
         run(manager._on_bar("SPY", FakeBar(
             "SPY", close=above_tp, volume=500,
@@ -227,8 +227,8 @@ class TestSessionManagerIntegration:
         assert len(mock.market_sells) == 1
         assert not manager.pos_tracker.is_open("SPY")
 
-    def test_no_duplicate_entry(self):
-        manager, mock = make_session()
+    def test_no_duplicate_entry(self, session):
+        manager, mock = session
         feed_orb_bars(manager)
         finalise_orb(manager)
 
