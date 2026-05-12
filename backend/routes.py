@@ -53,15 +53,24 @@ def _sync_fills(db: Session) -> None:
             symbol = order.symbol
 
             if order.side.value == 'buy':
-                # Update entry_price to actual fill price
+                # Update entry_price to actual fill price and recalc linked SELL pnl
                 buy = db.query(Trade).filter(
                     Trade.symbol == symbol,
                     Trade.action == 'BUY',
                     Trade.timestamp >= fill_time - timedelta(minutes=2),
                     Trade.timestamp <= fill_time + timedelta(minutes=2),
                 ).first()
-                if buy:
+                if buy and float(buy.entry_price or 0) != fill_price:
                     buy.entry_price = fill_price
+                    # Fix pnl on any linked SELL
+                    sell = db.query(Trade).filter(
+                        Trade.symbol == symbol,
+                        Trade.action == 'SELL',
+                        Trade.timestamp > fill_time,
+                        Trade.exit_price.isnot(None),
+                    ).order_by(Trade.timestamp).first()
+                    if sell and sell.exit_price:
+                        sell.pnl = round((float(sell.exit_price) - fill_price) * sell.quantity, 4)
 
             elif order.side.value == 'sell':
                 # Skip if already logged
