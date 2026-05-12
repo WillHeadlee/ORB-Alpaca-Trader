@@ -28,7 +28,11 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 function PerformanceChart({ data }) {
-  if (!data || data.length === 0) {
+  const safeData = (data || []).filter(
+    d => d && typeof d.cumulative_pnl === 'number' && isFinite(d.cumulative_pnl)
+  );
+
+  if (safeData.length === 0) {
     return (
       <div style={{
         height: 200,
@@ -45,14 +49,14 @@ function PerformanceChart({ data }) {
     );
   }
 
-  const isPositive = data[data.length - 1]?.cumulative_pnl >= 0;
+  const isPositive = safeData[safeData.length - 1]?.cumulative_pnl >= 0;
   const stroke = isPositive ? 'var(--green)' : 'var(--red)';
   const gradId  = isPositive ? 'gradGreen' : 'gradRed';
   const stopColor = isPositive ? '#00cc6a' : '#ff2d55';
 
   return (
     <ResponsiveContainer width="100%" height={210}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+      <AreaChart data={safeData} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%"   stopColor={stopColor} stopOpacity={0.22} />
