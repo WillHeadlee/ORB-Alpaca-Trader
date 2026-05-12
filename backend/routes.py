@@ -200,7 +200,17 @@ def kill_switch(db: Session = Depends(get_db), username: str = Depends(verify_to
 
         closed_count = len(positions)
 
-        # TODO: call Alpaca API to close positions before clearing DB
+        # Close all positions on Alpaca
+        try:
+            alpaca = TradingClient(
+                os.getenv('ALPACA_API_KEY'),
+                os.getenv('ALPACA_SECRET_KEY'),
+                paper=os.getenv('ALPACA_PAPER', 'true').lower() != 'false',
+            )
+            alpaca.close_all_positions(cancel_orders=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Alpaca close failed: {e}")
+
         db.add(SystemLog(
             level='CRITICAL',
             message=f'Kill switch activated by {username}. Closed {closed_count} positions.',
