@@ -21,8 +21,8 @@ from backend.models import ScreenerResult
 
 PRICE_MIN = 20
 PRICE_MAX = 500
-VOLUME_MIN = 5_000_000       # pre-filter: today's volume > 5M
-AVG_VOLUME_MIN = 10_000_000  # final filter: 20-day avg volume > 10M
+VOLUME_MIN = 150_000         # pre-filter: IEX feed ~3% of real volume (150K ≈ 5M real)
+AVG_VOLUME_MIN = 300_000     # final filter: 20-day avg (300K ≈ 10M real)
 BATCH_SIZE = 1000
 TOP_N = 100
 
@@ -54,7 +54,7 @@ def scan_top_100():
             snaps = data_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch))
             for symbol, snap in snaps.items():
                 # Use prev_daily_bar for volume (complete); latest_trade for price
-                bar = snap.prev_daily_bar or snap.daily_bar
+                bar = snap.previous_daily_bar or snap.daily_bar
                 if bar is None:
                     continue
                 price = float(snap.latest_trade.price) if snap.latest_trade else float(bar.close)
