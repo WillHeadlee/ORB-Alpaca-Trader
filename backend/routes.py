@@ -42,7 +42,7 @@ def _sync_fills(db: Session) -> None:
         ))
 
         for order in orders:
-            if str(order.side) not in ('OrderSide.SELL', 'sell') or str(order.status) != 'filled':
+            if order.side.value != 'sell' or order.status.value != 'filled':
                 continue
             fill_price = float(order.filled_avg_price or 0)
             qty = int(float(order.filled_qty or 0))
