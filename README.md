@@ -1,23 +1,26 @@
 # ORB Alpaca Trader
 
-An automated day trading bot implementing the **Opening Range Breakout (ORB)** strategy, connected to [Alpaca Markets](https://alpaca.markets). Includes a live web dashboard, stock screener, PostgreSQL trade history, and Google Drive backups.
+An automated day trading bot implementing the **Opening Range Breakout (ORB)** strategy, connected to [Alpaca Markets](https://alpaca.markets). Includes a live web dashboard, daily stock screener, PostgreSQL trade history, Google Drive backups, and remote access via Tailscale.
 
 ---
 
 ## Strategy
 
-The bot observes the first 15 minutes after the 9:30 AM ET open to define an *opening range* (high and low). If price breaks above the range high with above-average volume, it enters a long position with a bracket order (stop-loss + take-profit). All positions are force-closed at 3:55 PM ET.
+The bot observes the first 15 minutes after the 9:30 AM ET open to define an *opening range* (high and low). If price breaks above the range high with above-average volume, it enters a long position with a broker-side bracket order (stop-loss + take-profit). All positions are force-closed at 3:55 PM ET.
 
 | Parameter | Default | Description |
 |---|---|---|
 | Opening range | 15 min | Observation window after open |
-| Risk per trade | 1.5% | Max % of equity risked |
+| Risk per trade | 1.5% | Max % of equity risked per trade |
+| Max position size | 20% | Cap on total position cost as % of equity |
 | Stop-loss | 0.5% below entry | Submitted as broker stop order |
 | Take-profit | 2:1 reward/risk | Submitted as broker limit order |
 | Hard close | 3:55 PM ET | Force-closes all positions |
 | Volume filter | 1.2× avg | Breakout bar must exceed this |
 
-Watchlist is populated daily from the stock screener (top 20 by volume × volatility score). Falls back to `config.yaml` if no screener data exists.
+The watchlist is populated each morning from the stock screener (top 20 symbols by volume × volatility score). Falls back to the `config.yaml` watchlist if no screener data exists.
+
+With a 2:1 reward/risk ratio, the strategy needs a win rate above ~35% to be profitable. Historical ORB win rates on liquid stocks run 45–55%.
 
 ---
 
@@ -28,30 +31,35 @@ Watchlist is populated daily from the stock screener (top 20 by volume × volati
 ├── config.yaml                  # Strategy parameters and fallback watchlist
 ├── trader/
 │   ├── alpaca_client.py         # REST order management (bracket orders)
-│   ├── data_feed.py             # WebSocket real-time bar feed
+│   ├── data_feed.py             # WebSocket real-time bar feed (auto-reconnect)
 │   ├── opening_range.py         # ORB high/low tracking
-│   ├── position_manager.py      # Position sizing and stop/target levels
+│   ├── position_manager.py      # Position sizing with risk + equity cap
 │   ├── strategy.py              # Entry/exit signal logic
-│   └── session_manager.py       # Session lifecycle and scheduling
+│   └── session_manager.py       # Session lifecycle, screener watchlist loading
 ├── backend/
 │   ├── app.py                   # FastAPI application
-│   ├── auth.py                  # JWT authentication
+│   ├── auth.py                  # JWT authentication (bcrypt passwords)
 │   ├── database.py              # SQLAlchemy / PostgreSQL connection
-│   ├── models.py                # ORM models
-│   └── routes.py                # REST API endpoints
+│   ├── models.py                # ORM models (trades, positions, screener, logs)
+│   └── routes.py                # REST API — dashboard, trading controls, fill sync
 ├── frontend/                    # React + Vite + Tailwind dashboard
+│   └── src/
+│       ├── Dashboard.jsx        # Main trading dashboard
+│       ├── KillSwitch.jsx       # Emergency close + test-run controls
+│       └── PerformanceChart.jsx # 30-day cumulative P&L chart
 ├── screener/
-│   └── scan.py                  # Daily stock screener (Alpaca snapshots)
+│   └── scan.py                  # Daily screener — batch Alpaca snapshots, top 100
 ├── scripts/
 │   ├── init_db.sql              # PostgreSQL schema
 │   ├── create_user.py           # Dashboard user creation
 │   ├── backup.sh                # Restic + rclone backup to Google Drive
+│   ├── test_trade.py            # End-to-end paper trade verification
 │   └── migrate_from_sqlite.py   # One-time migration from old SQLite DB
 └── utils/
-    ├── logger.py                # Trade logging and session stats
+    ├── logger.py                # Rotating file + console logger, session stats
     ├── metrics.py               # PostgreSQL trade persistence
-    ├── email_alerts.py          # Gmail SMTP alerts
-    └── time_utils.py            # ET timezone helpers
+    ├── email_alerts.py          # Gmail SMTP alerts (kill switch, errors)
+    └── time_utils.py            # ET timezone helpers, market hours
 ```
 
 ---
@@ -88,12 +96,10 @@ sudo -u postgres psql orb_trader < scripts/init_db.sql
 Create `/etc/orb-trader/.env`:
 
 ```bash
-# Alpaca (paper trading)
+# Alpaca API
 ALPACA_API_KEY=your_key
 ALPACA_SECRET_KEY=your_secret
-
-# Set to 'false' for live trading
-ALPACA_PAPER=true
+ALPACA_PAPER=true            # set to false for live trading
 
 # Database
 DATABASE_URL=postgresql://postgres:yourpassword@localhost/orb_trader
@@ -117,8 +123,7 @@ ALERT_EMAIL=you@gmail.com
 
 ```bash
 cd /opt/orb-trader/frontend
-npm install
-npm run build
+npm install && npm run build
 ```
 
 ### 6. Systemd services
@@ -168,7 +173,6 @@ sudo systemctl enable --now orb-api orb-trader caddy
 
 ### 7. Reverse proxy (Caddy)
 
-Copy `Caddyfile` to `/etc/caddy/Caddyfile` and reload:
 ```bash
 sudo cp /opt/orb-trader/Caddyfile /etc/caddy/Caddyfile
 sudo systemctl reload caddy
@@ -200,9 +204,17 @@ tailscale ip -4   # access dashboard at http://<this-ip>
 
 ## Dashboard
 
-The web dashboard shows live bot status, account equity, today's P&L, open positions, 30-day performance chart, trade log, and screener results. It polls every 5 seconds.
+Access at `http://<tailscale-ip>` (port 80 via Caddy). Features:
 
-Access at `http://<server-ip>` (port 80 via Caddy) or `http://<tailscale-ip>:8000` directly.
+- Live bot status, trading mode, account equity
+- Real-time clock (ET)
+- Today's P&L, 30-day P&L, win rate
+- Open positions pulled live from Alpaca
+- 30-day cumulative P&L chart
+- Trade log with auto-synced Alpaca fills
+- Stock screener results (top 20)
+- **TEST RUN** — triggers the strategy right now on the top screener symbol
+- **CLOSE ALL** — emergency kill switch with confirmation
 
 ---
 
@@ -210,30 +222,32 @@ Access at `http://<server-ip>` (port 80 via Caddy) or `http://<tailscale-ip>:800
 
 | Time (ET) | Event |
 |---|---|
-| 9:15 AM | Screener scans top stocks, saves to DB |
-| 9:30 AM | Bot wakes, loads screener watchlist |
-| 9:45 AM | Opening range established, entries active |
+| 9:15 AM | Screener scans ~11,000 stocks, saves top 100 to DB |
+| 9:30 AM | Bot wakes, loads top 20 screener symbols as watchlist |
+| 9:30–9:45 AM | Opening range established (bot observes, does not trade) |
+| 9:45 AM+ | Entry signals active — bracket orders submitted on breakouts |
 | 3:55 PM | Hard close — all positions liquidated |
 | 6:00 PM | Backup runs to Google Drive |
-
----
-
-## Live Trading
-
-Change `ALPACA_PAPER=false` in `/etc/orb-trader/.env` and swap in your live API keys. The bot requires explicit `yes` confirmation at startup.
-
-**Run in paper mode for at least 2–4 weeks before going live.**
 
 ---
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -v
+/opt/orb-trader/venv/bin/pytest tests/ -v
+# 51 passed
 ```
+
+Covers: opening range logic, position sizing (with and without equity cap), entry/exit signal generation, position tracker.
+
+---
+
+## Live Trading
+
+Change `ALPACA_PAPER=false` in `/etc/orb-trader/.env` and swap in live API keys. The bot requires explicit `yes` confirmation at startup. **Run paper for at least 2–4 weeks first.**
 
 ---
 
 ## Disclaimer
 
-This project is for educational purposes only. It is not financial advice. Past paper trading performance does not guarantee live results. You are solely responsible for any trading decisions made using this software.
+Educational purposes only. Not financial advice. Past paper performance does not guarantee live results. You are solely responsible for any trading decisions made using this software.
