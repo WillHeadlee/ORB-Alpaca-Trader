@@ -13,17 +13,81 @@ from backend.models import Trade, Position, DailySummary, ScreenerResult, User, 
 from backend.auth import verify_password, create_access_token, get_password_hash, verify_token
 from utils.email_alerts import send_alert
 
+def _alpaca_client() -> TradingClient:
+    return TradingClient(
+        os.getenv('ALPACA_API_KEY'),
+        os.getenv('ALPACA_SECRET_KEY'),
+        paper=os.getenv('ALPACA_PAPER', 'true').lower() != 'false',
+    )
+
 def _get_alpaca_balance() -> float:
     try:
-        client = TradingClient(
-            os.getenv('ALPACA_API_KEY'),
-            os.getenv('ALPACA_SECRET_KEY'),
-            paper=os.getenv('ALPACA_PAPER', 'true').lower() != 'false',
-        )
-        account = client.get_account()
-        return float(account.equity)
+        return float(_alpaca_client().get_account().equity)
     except Exception:
         return 0.0
+
+def _sync_fills(db: Session) -> None:
+    """Pull filled SELL orders from Alpaca and log any missing ones to the DB."""
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus, OrderSide
+        from datetime import timezone
+
+        paper = os.getenv('ALPACA_PAPER', 'true').lower() != 'false'
+        client = _alpaca_client()
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        orders = client.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED,
+            after=since,
+        ))
+
+        for order in orders:
+            if str(order.side) not in ('OrderSide.SELL', 'sell') or str(order.status) != 'filled':
+                continue
+            fill_price = float(order.filled_avg_price or 0)
+            qty = int(float(order.filled_qty or 0))
+            if fill_price == 0 or qty == 0:
+                continue
+
+            fill_time = order.filled_at
+            symbol = order.symbol
+
+            # Skip if already logged (within 2-minute window)
+            existing = db.query(Trade).filter(
+                Trade.symbol == symbol,
+                Trade.action == 'SELL',
+                Trade.timestamp >= fill_time - timedelta(minutes=2),
+                Trade.timestamp <= fill_time + timedelta(minutes=2),
+            ).first()
+            if existing:
+                continue
+
+            # Calculate PnL against most recent unmatched BUY
+            buy = db.query(Trade).filter(
+                Trade.symbol == symbol,
+                Trade.action == 'BUY',
+                Trade.exit_price.is_(None),
+            ).order_by(Trade.timestamp.desc()).first()
+
+            pnl = None
+            if buy and buy.entry_price:
+                pnl = round((fill_price - float(buy.entry_price)) * qty, 4)
+                buy.exit_price = fill_price
+
+            db.add(Trade(
+                timestamp=fill_time,
+                symbol=symbol,
+                action='SELL',
+                quantity=qty,
+                exit_price=fill_price,
+                pnl=pnl,
+                mode='paper' if paper else 'live',
+            ))
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[sync_fills] {e}")
 
 router = APIRouter()
 
@@ -45,6 +109,8 @@ def login(username: str, password: str, db: Session = Depends(get_db)):
 
 @router.get("/api/dashboard/status")
 def get_status(db: Session = Depends(get_db), username: str = Depends(verify_token)):
+    _sync_fills(db)
+
     try:
         result = subprocess.run(['/usr/bin/systemctl', 'is-active', 'orb-trader'],
                                 capture_output=True, text=True)
