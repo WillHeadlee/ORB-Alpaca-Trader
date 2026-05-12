@@ -60,6 +60,11 @@ class API {
     return response.data;
   }
 
+  async testRun() {
+    const response = await this.client.post('/trading/test-run');
+    return response.data;
+  }
+
   async killSwitch() {
     const response = await this.client.post('/trading/kill-switch');
     return response.data;

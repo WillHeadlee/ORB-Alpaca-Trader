@@ -263,6 +263,100 @@ def get_positions(db: Session = Depends(get_db), username: str = Depends(verify_
         ]
     }
 
+@router.post("/api/trading/test-run")
+def test_run(db: Session = Depends(get_db), username: str = Depends(verify_token)):
+    """
+    Runs the ORB strategy right now against the top screener symbol.
+    Uses real position sizing and submits a live paper bracket order.
+    WARNING: places a real paper trade — do not use near market close.
+    """
+    import yaml
+    from pathlib import Path
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockSnapshotRequest
+    from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+    from trader.position_manager import build_levels
+
+    # Load strategy config
+    cfg_path = Path(__file__).resolve().parent.parent / 'config.yaml'
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f)
+    strategy = cfg['strategy']
+
+    # Get top symbol from latest screener scan
+    latest_scan = db.query(func.max(ScreenerResult.scan_timestamp)).scalar()
+    if not latest_scan:
+        raise HTTPException(status_code=400, detail="No screener data — run the screener first from the dashboard or wait for 9:15 AM ET")
+
+    top = db.query(ScreenerResult).filter(
+        ScreenerResult.scan_timestamp == latest_scan
+    ).order_by(ScreenerResult.score.desc()).first()
+
+    if not top:
+        raise HTTPException(status_code=400, detail="No screener results found")
+
+    symbol = top.symbol
+
+    # Alpaca clients
+    api_key    = os.getenv('ALPACA_API_KEY')
+    secret_key = os.getenv('ALPACA_SECRET_KEY')
+    paper      = os.getenv('ALPACA_PAPER', 'true').lower() != 'false'
+    trading    = TradingClient(api_key, secret_key, paper=paper)
+    data       = StockHistoricalDataClient(api_key, secret_key)
+
+    # Get equity and current price
+    equity = float(trading.get_account().equity)
+    snaps  = data.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[symbol]))
+    snap   = snaps.get(symbol)
+    if not snap or not snap.latest_trade:
+        raise HTTPException(status_code=400, detail=f"Could not get current price for {symbol}")
+    price = float(snap.latest_trade.price)
+
+    # Calculate position levels using ORB parameters
+    levels = build_levels(
+        symbol=symbol,
+        entry_price=price,
+        equity=equity,
+        stop_loss_pct=strategy['stop_loss_pct'],
+        risk_per_trade_pct=strategy['risk_per_trade_pct'],
+        reward_risk_ratio=strategy['reward_risk_ratio'],
+    )
+    if levels.shares < 1:
+        raise HTTPException(status_code=400, detail=f"Position size is 0 shares for {symbol} at ${price:.2f}")
+
+    # Submit bracket order
+    order = trading.submit_order(MarketOrderRequest(
+        symbol=symbol,
+        qty=levels.shares,
+        side=OrderSide.BUY,
+        time_in_force=TimeInForce.DAY,
+        order_class=OrderClass.BRACKET,
+        take_profit=TakeProfitRequest(limit_price=round(levels.take_profit, 2)),
+        stop_loss=StopLossRequest(stop_price=round(levels.stop_loss, 2)),
+    ))
+
+    # Log to DB
+    from utils.metrics import log_trade
+    log_trade(symbol, 'BUY', levels.shares, price)
+
+    db.add(SystemLog(
+        level='INFO',
+        message=f'Test run by {username}: BUY {levels.shares} {symbol} @ ${price:.2f} | stop={levels.stop_loss:.2f} target={levels.take_profit:.2f}',
+        source='test_run',
+    ))
+    db.commit()
+
+    return {
+        "symbol": symbol,
+        "shares": levels.shares,
+        "entry_price": round(price, 2),
+        "stop_loss": levels.stop_loss,
+        "take_profit": levels.take_profit,
+        "order_id": str(order.id),
+        "screener_score": float(top.score),
+    }
+
 # ============================================================================
 # SCREENER
 # ============================================================================
