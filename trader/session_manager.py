@@ -13,7 +13,7 @@ from trader.strategy import Signal, evaluate_entry, evaluate_exit
 from trader.data_feed import DataFeed
 from utils.logger import log, SessionStats, TradeRecord
 from utils.metrics import init_db, log_trade, save_daily_summary
-from utils.notifier import notify_trade, notify_daily_summary
+from utils.notifier import notify_daily_summary
 from utils.time_utils import (
     now_et, opening_range_end, hard_close_dt, seconds_until,
     is_market_open, wait_until_market_open,
@@ -172,7 +172,6 @@ class SessionManager:
                     shares=levels.shares, reason=result.reason,
                 ))
                 log_trade(symbol, "BUY", levels.shares, price)
-                notify_trade("ENTRY", symbol, price, levels.shares, result.reason)
                 log.info(
                     f"{symbol}: stop={levels.stop_loss:.2f}, "
                     f"target={levels.take_profit:.2f}"
@@ -206,7 +205,6 @@ class SessionManager:
                 shares=levels.shares, reason=result.reason, pnl=pnl,
             ))
             log_trade(symbol, "SELL", levels.shares, price, pnl)
-            notify_trade("EXIT", symbol, price, levels.shares, result.reason, pnl)
 
     # ------------------------------------------------------------------
     # Scheduled tasks
