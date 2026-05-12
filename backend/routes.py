@@ -4,6 +4,7 @@ from sqlalchemy import func
 from datetime import datetime, timedelta, date
 from typing import Optional
 import subprocess
+import time as _time
 import os
 
 from alpaca.trading.client import TradingClient
@@ -12,6 +13,12 @@ from backend.database import get_db
 from backend.models import Trade, Position, DailySummary, ScreenerResult, User, SystemLog
 from backend.auth import verify_password, create_access_token, get_password_hash, verify_token
 from utils.email_alerts import send_alert
+
+# Module-level cache to avoid hitting Alpaca on every 5-second dashboard poll
+_alpaca_cache: dict = {"ts": 0.0, "balance": 0.0, "positions": [], "mode": "paper"}
+_sync_last_run: float = 0.0
+_ALPACA_TTL = 10   # seconds between Alpaca balance/position refreshes
+_SYNC_TTL   = 30   # seconds between fill syncs
 
 def _alpaca_client() -> TradingClient:
     return TradingClient(
@@ -130,7 +137,13 @@ def login(username: str, password: str, db: Session = Depends(get_db)):
 
 @router.get("/api/dashboard/status")
 def get_status(db: Session = Depends(get_db), username: str = Depends(verify_token)):
-    _sync_fills(db)
+    global _sync_last_run, _alpaca_cache
+    now = _time.time()
+
+    # Throttle fill sync to once per 30s
+    if now - _sync_last_run > _SYNC_TTL:
+        _sync_fills(db)
+        _sync_last_run = now
 
     try:
         result = subprocess.run(['/usr/bin/systemctl', 'is-active', 'orb-trader'],
@@ -143,35 +156,34 @@ def get_status(db: Session = Depends(get_db), username: str = Depends(verify_tok
     today_trades = db.query(Trade).filter(func.date(Trade.timestamp) == today).all()
     today_pnl = sum(float(t.pnl or 0) for t in today_trades)
 
-    # Fetch live positions and balance directly from Alpaca
-    try:
-        client = _alpaca_client()
-        account = client.get_account()
-        account_balance = float(account.equity)
-        mode = "paper" if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else "live"
-        alpaca_positions = client.get_all_positions()
-        positions = [
-            {
-                "symbol": p.symbol,
-                "quantity": int(p.qty),
-                "entry_price": float(p.avg_entry_price),
-                "current_price": float(p.current_price),
-                "unrealized_pnl": float(p.unrealized_pl),
-                "entry_time": None,
-            }
-            for p in alpaca_positions
-        ]
-    except Exception:
-        account_balance = 0.0
-        mode = "paper"
-        positions = []
+    # Refresh Alpaca data at most every 10s; serve cached data in between
+    if now - _alpaca_cache["ts"] > _ALPACA_TTL:
+        try:
+            client = _alpaca_client()
+            account = client.get_account()
+            _alpaca_cache["balance"] = float(account.equity)
+            _alpaca_cache["mode"] = "paper" if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else "live"
+            _alpaca_cache["positions"] = [
+                {
+                    "symbol": p.symbol,
+                    "quantity": int(p.qty),
+                    "entry_price": float(p.avg_entry_price),
+                    "current_price": float(p.current_price),
+                    "unrealized_pnl": float(p.unrealized_pl),
+                    "entry_time": None,
+                }
+                for p in client.get_all_positions()
+            ]
+            _alpaca_cache["ts"] = now
+        except Exception:
+            pass  # serve stale cached data on transient error
 
     return {
         "bot_status": bot_status,
-        "mode": mode,
-        "positions": positions,
+        "mode": _alpaca_cache["mode"],
+        "positions": _alpaca_cache["positions"],
         "today_pnl": today_pnl,
-        "account_balance": account_balance,
+        "account_balance": _alpaca_cache["balance"],
     }
 
 @router.get("/api/dashboard/trades")

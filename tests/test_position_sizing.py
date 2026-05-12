@@ -30,10 +30,10 @@ class TestCalculateShares:
         )
         assert shares == 60
 
-    def test_max_position_cap_applied(self):
+    def test_max_position_cap_binding_cheap_stock(self):
         # equity=100000, entry=25, stop=0.5%, risk=1.5%, cap=20%
         # risk-based: stop=0.125, max_risk=1500, shares=12000
-        # cap: 100000*20%/25 = 800 shares → cap wins
+        # cap: 100000*20%/25 = 800 → cap wins
         shares = calculate_shares(
             equity=100_000, entry_price=25.0,
             stop_loss_pct=0.5, risk_per_trade_pct=1.5,
@@ -41,7 +41,7 @@ class TestCalculateShares:
         )
         assert shares == 800
 
-    def test_max_position_cap_not_binding(self):
+    def test_max_position_cap_binding_expensive_stock(self):
         # equity=100000, entry=500, stop=0.5%, risk=1.5%, cap=20%
         # risk-based: stop=2.50, max_risk=1500, shares=600
         # cap: 100000*20%/500 = 40 → cap wins (600 > 40)
@@ -51,6 +51,17 @@ class TestCalculateShares:
             max_position_pct=20,
         )
         assert shares == 40
+
+    def test_max_position_cap_not_binding(self):
+        # equity=100000, entry=500, stop=5%, risk=0.5%, cap=20%
+        # risk-based: stop=25, max_risk=500, shares=20
+        # cap: 100000*20%/500 = 40 → risk wins (20 < 40)
+        shares = calculate_shares(
+            equity=100_000, entry_price=500.0,
+            stop_loss_pct=5.0, risk_per_trade_pct=0.5,
+            max_position_pct=20,
+        )
+        assert shares == 20
 
     def test_zero_entry_price_returns_zero(self):
         shares = calculate_shares(10_000, 0.0, 0.5, 1.5)

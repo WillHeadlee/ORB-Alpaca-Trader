@@ -46,7 +46,7 @@ def build_levels(
     stop_loss_pct: float,
     risk_per_trade_pct: float,
     reward_risk_ratio: float,
-    max_position_pct: float = 20.0,
+    max_position_pct: float = None,
 ) -> PositionLevels:
     shares = calculate_shares(equity, entry_price, stop_loss_pct, risk_per_trade_pct, max_position_pct)
     stop_distance = entry_price * stop_loss_pct / 100.0

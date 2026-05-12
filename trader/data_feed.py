@@ -15,11 +15,11 @@ BarCallback = Callable[[str, Bar], Awaitable[None]]
 
 class DataFeed:
     def __init__(self, symbols: list[str], on_bar: BarCallback) -> None:
-        api_key = os.getenv("ALPACA_API_KEY", "")
-        secret_key = os.getenv("ALPACA_SECRET_KEY", "")
+        self._api_key = os.getenv("ALPACA_API_KEY", "")
+        self._secret_key = os.getenv("ALPACA_SECRET_KEY", "")
         self._symbols = symbols
         self._on_bar = on_bar
-        self._stream = StockDataStream(api_key, secret_key)
+        self._stream = None
 
     def _make_handler(self) -> BarCallback:
         on_bar = self._on_bar
@@ -40,10 +40,7 @@ class DataFeed:
 
         for attempt in range(1, max_retries + 1):
             try:
-                self._stream = StockDataStream(
-                    os.getenv("ALPACA_API_KEY", ""),
-                    os.getenv("ALPACA_SECRET_KEY", ""),
-                )
+                self._stream = StockDataStream(self._api_key, self._secret_key)
                 self._stream.subscribe_bars(handler, *self._symbols)
                 log.info(f"DataFeed: subscribing to {self._symbols} (attempt {attempt})")
                 await loop.run_in_executor(None, self._stream.run)
