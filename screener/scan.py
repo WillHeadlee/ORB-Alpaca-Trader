@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+Daily stock screener — runs at 9:15 AM ET Mon-Fri.
+
+Uses Alpaca snapshots for bulk price/volume pre-filtering, then fetches
+20-day bars only for the candidates that pass. Saves top 100 to DB.
+"""
 
 import os
 import sys
@@ -8,18 +14,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alpaca.trading.client import TradingClient
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockSnapshotRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from backend.database import SessionLocal
 from backend.models import ScreenerResult
 
-def scan_top_100():
-    """
-    Run at 9:15 AM daily to find high-liquidity ORB candidates.
+PRICE_MIN = 20
+PRICE_MAX = 500
+VOLUME_MIN = 5_000_000       # pre-filter: today's volume > 5M
+AVG_VOLUME_MIN = 10_000_000  # final filter: 20-day avg volume > 10M
+BATCH_SIZE = 1000
+TOP_N = 100
 
-    Criteria: tradable, active, avg 20-day volume > 10M, price $20-$500.
-    Score: volume (60%) + volatility (40%).
-    """
+
+def scan_top_100():
     print(f"Starting screener scan at {datetime.now()}")
 
     api_key = os.getenv('ALPACA_API_KEY')
@@ -28,71 +36,91 @@ def scan_top_100():
     trading_client = TradingClient(api_key, secret_key, paper=True)
     data_client = StockHistoricalDataClient(api_key, secret_key)
 
+    # Step 1: get all tradable assets
     assets = trading_client.get_all_assets()
-    tradable = [
-        a for a in assets
-        if a.tradable and a.status == 'active' and a.exchange in ('NASDAQ', 'NYSE', 'ARCA')
+    symbols = [
+        a.symbol for a in assets
+        if a.tradable and a.status == 'active'
+        and a.exchange in ('NASDAQ', 'NYSE', 'ARCA')
+        and '/' not in a.symbol  # exclude crypto-style symbols
     ]
-    print(f"Found {len(tradable)} tradable assets")
+    print(f"Found {len(symbols)} tradable assets — fetching snapshots in batches...")
 
+    # Step 2: batch snapshot requests to pre-filter by price and rough volume
+    candidates = []
+    for i in range(0, len(symbols), BATCH_SIZE):
+        batch = symbols[i:i + BATCH_SIZE]
+        try:
+            snaps = data_client.get_stock_snapshots(StockSnapshotRequest(symbol_or_symbols=batch))
+            for symbol, snap in snaps.items():
+                if snap.daily_bar is None:
+                    continue
+                price = float(snap.daily_bar.close)
+                volume = int(snap.daily_bar.volume)
+                if PRICE_MIN <= price <= PRICE_MAX and volume >= VOLUME_MIN:
+                    candidates.append(symbol)
+        except Exception as e:
+            print(f"Snapshot batch {i//BATCH_SIZE + 1} error: {e}")
+        print(f"  Snapshot batch {i//BATCH_SIZE + 1}/{-(-len(symbols)//BATCH_SIZE)} — {len(candidates)} candidates so far")
+
+    print(f"Pre-filter complete: {len(candidates)} candidates pass price/volume screen")
+
+    # Step 3: fetch 20-day bars for candidates to calculate proper avg volume + volatility
     results = []
     scan_timestamp = datetime.now()
 
-    for i, asset in enumerate(tradable):
+    for i in range(0, len(candidates), BATCH_SIZE):
+        batch = candidates[i:i + BATCH_SIZE]
         try:
-            bars_request = StockBarsRequest(
-                symbol_or_symbols=asset.symbol,
+            bars_resp = data_client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=batch,
                 timeframe=TimeFrame.Day,
                 start=datetime.now() - timedelta(days=30),
                 end=datetime.now(),
-            )
-            bars = data_client.get_stock_bars(bars_request)
+            ))
 
-            if asset.symbol not in bars.data:
-                continue
+            for symbol in batch:
+                if symbol not in bars_resp.data:
+                    continue
+                symbol_bars = bars_resp.data[symbol]
+                if len(symbol_bars) < 20:
+                    continue
 
-            symbol_bars = bars.data[asset.symbol]
-            if len(symbol_bars) < 20:
-                continue
+                volumes = [bar.volume for bar in symbol_bars[-20:]]
+                closes = [bar.close for bar in symbol_bars[-20:]]
+                avg_volume = sum(volumes) / len(volumes)
+                current_price = float(closes[-1])
 
-            volumes = [bar.volume for bar in symbol_bars]
-            closes = [bar.close for bar in symbol_bars]
-            avg_volume = sum(volumes[-20:]) / 20
-            current_price = closes[-1]
+                if avg_volume < AVG_VOLUME_MIN:
+                    continue
+                if not (PRICE_MIN <= current_price <= PRICE_MAX):
+                    continue
 
-            if avg_volume < 10_000_000:
-                continue
-            if not (20 <= current_price <= 500):
-                continue
+                highs = [bar.high for bar in symbol_bars[-14:]]
+                lows = [bar.low for bar in symbol_bars[-14:]]
+                atr = sum(h - l for h, l in zip(highs, lows)) / 14
+                volatility = (atr / current_price) * 100
 
-            highs = [bar.high for bar in symbol_bars[-14:]]
-            lows = [bar.low for bar in symbol_bars[-14:]]
-            atr = sum(h - l for h, l in zip(highs, lows)) / 14
-            volatility = (atr / current_price) * 100
+                score = (avg_volume / 1_000_000) * 0.6 + volatility * 0.4
 
-            score = (avg_volume / 1_000_000) * 0.6 + volatility * 0.4
-
-            results.append({
-                'symbol': asset.symbol,
-                'price': float(current_price),
-                'avg_volume': int(avg_volume),
-                'volatility': round(volatility, 2),
-                'score': round(score, 2),
-            })
-
-            if (i + 1) % 100 == 0:
-                print(f"Processed {i + 1}/{len(tradable)} assets")
-
-        except Exception:
-            continue
+                results.append({
+                    'symbol': symbol,
+                    'price': round(current_price, 4),
+                    'avg_volume': int(avg_volume),
+                    'volatility': round(volatility, 2),
+                    'score': round(score, 2),
+                })
+        except Exception as e:
+            print(f"Bars batch error: {e}")
 
     results.sort(key=lambda x: x['score'], reverse=True)
-    top_100 = results[:100]
-    print(f"Found {len(results)} qualifying symbols, saving top 100")
+    top = results[:TOP_N]
+    print(f"Qualified: {len(results)} symbols — saving top {len(top)}")
+    print("Top 10:", [r['symbol'] for r in top[:10]])
 
     db = SessionLocal()
     try:
-        for r in top_100:
+        for r in top:
             db.add(ScreenerResult(
                 scan_timestamp=scan_timestamp,
                 symbol=r['symbol'],
@@ -102,12 +130,13 @@ def scan_top_100():
                 score=r['score'],
             ))
         db.commit()
-        print(f"Saved {len(top_100)} screener results")
+        print(f"Saved {len(top)} screener results to database")
     except Exception as e:
         db.rollback()
         print(f"Error saving to database: {e}")
     finally:
         db.close()
+
 
 if __name__ == '__main__':
     scan_top_100()
