@@ -5,11 +5,12 @@ while exercising the full ORB formation → entry signal → order submission �
 exit signal pipeline.
 """
 
-import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from unittest.mock import patch
+
+import pytest
 
 from trader.session_manager import SessionManager
 
@@ -38,6 +39,7 @@ class FakeBar:
 @dataclass
 class FakeOrder:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    legs: list = field(default_factory=list)
 
 
 # ── Mock Alpaca client ─────────────────────────────────────────────────────────
@@ -89,16 +91,13 @@ TEST_CONFIG = {
     },
 }
 
-# ORB parameters used across tests
 ORB_HIGH = 450.0
 ORB_LOW = 445.0
-ORB_BASE_VOL = 1_000    # avg volume per ORB bar
-ENTRY_PRICE = 451.0     # breakout close price
-STOP_LOSS = ENTRY_PRICE * (1 - 0.005)    # ~448.75
-TAKE_PROFIT = ENTRY_PRICE + (ENTRY_PRICE - STOP_LOSS) * 2.0  # ~455.50
+ORB_BASE_VOL = 1_000
+ENTRY_PRICE = 451.0
+STOP_LOSS = ENTRY_PRICE * (1 - 0.005)
+TAKE_PROFIT = ENTRY_PRICE + (ENTRY_PRICE - STOP_LOSS) * 2.0
 
-
-import pytest
 
 @pytest.fixture
 def session():
@@ -112,17 +111,13 @@ def session():
         yield manager, mock_client
 
 
-def run(coro):
-    return asyncio.run(coro)
-
-
-def feed_orb_bars(manager: "SessionManager", n: int = 15) -> None:
+async def feed_orb_bars(manager: "SessionManager", n: int = 15) -> None:
     """Feed n ORB-window bars building range_high=450, range_low=445."""
     for _ in range(n):
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=447.0, volume=ORB_BASE_VOL,
             high=ORB_HIGH, low=ORB_LOW,
-        )))
+        ))
 
 
 def finalise_orb(manager: "SessionManager") -> None:
@@ -134,39 +129,43 @@ def finalise_orb(manager: "SessionManager") -> None:
 
 class TestSessionManagerIntegration:
 
-    def test_orb_range_builds_correctly(self, session):
+    @pytest.mark.asyncio
+    async def test_orb_range_builds_correctly(self, session):
         manager, _ = session
-        run(manager._on_bar("SPY", FakeBar("SPY", close=447.0, volume=1000, high=450.0, low=445.0)))
-        run(manager._on_bar("SPY", FakeBar("SPY", close=448.0, volume=1000, high=449.0, low=445.5)))
-        run(manager._on_bar("SPY", FakeBar("SPY", close=446.0, volume=1000, high=448.0, low=444.0)))
+        await manager._on_bar("SPY", FakeBar("SPY", close=447.0, volume=1000, high=450.0, low=445.0))
+        await manager._on_bar("SPY", FakeBar("SPY", close=448.0, volume=1000, high=449.0, low=445.5))
+        await manager._on_bar("SPY", FakeBar("SPY", close=446.0, volume=1000, high=448.0, low=444.0))
 
         orb = manager.orb_tracker.get("SPY")
         assert orb.range_high == 450.0
         assert orb.range_low == 444.0
         assert manager._orb_done is False
 
-    def test_no_entry_before_orb_done(self, session):
+    @pytest.mark.asyncio
+    async def test_no_entry_before_orb_done(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         assert len(mock.bracket_buys) == 0
 
-    def test_no_entry_inside_range(self, session):
+    @pytest.mark.asyncio
+    async def test_no_entry_inside_range(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
         for _ in range(5):
-            run(manager._on_bar("SPY", FakeBar("SPY", close=447.5, volume=ORB_BASE_VOL * 2)))
+            await manager._on_bar("SPY", FakeBar("SPY", close=447.5, volume=ORB_BASE_VOL * 2))
         assert len(mock.bracket_buys) == 0
 
-    def test_breakout_triggers_entry(self, session):
+    @pytest.mark.asyncio
+    async def test_breakout_triggers_entry(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
 
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=ENTRY_PRICE, volume=int(ORB_BASE_VOL * 1.5),
             high=452.0, low=450.5,
-        )))
+        ))
 
         assert len(mock.bracket_buys) == 1
         order = mock.bracket_buys[0]
@@ -175,68 +174,72 @@ class TestSessionManagerIntegration:
         assert order["stop_loss"] < ENTRY_PRICE
         assert order["take_profit"] > ENTRY_PRICE
 
-    def test_low_volume_breakout_skipped(self, session):
+    @pytest.mark.asyncio
+    async def test_low_volume_breakout_skipped(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
 
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=ENTRY_PRICE, volume=500,
             high=452.0, low=450.5,
-        )))
+        ))
 
         assert len(mock.bracket_buys) == 0
 
-    def test_stop_loss_triggers_exit(self, session):
+    @pytest.mark.asyncio
+    async def test_stop_loss_triggers_exit(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
 
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=ENTRY_PRICE, volume=int(ORB_BASE_VOL * 1.5),
             high=452.0, low=450.5,
-        )))
+        ))
         assert len(mock.bracket_buys) == 1
 
         below_stop = STOP_LOSS - 0.50
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=below_stop, volume=500,
             high=below_stop + 0.1, low=below_stop - 0.5,
-        )))
+        ))
 
         assert len(mock.market_sells) == 1
         assert not manager.pos_tracker.is_open("SPY")
 
-    def test_take_profit_triggers_exit(self, session):
+    @pytest.mark.asyncio
+    async def test_take_profit_triggers_exit(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
 
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=ENTRY_PRICE, volume=int(ORB_BASE_VOL * 1.5),
             high=452.0, low=450.5,
-        )))
+        ))
         assert len(mock.bracket_buys) == 1
 
         above_tp = TAKE_PROFIT + 0.50
-        run(manager._on_bar("SPY", FakeBar(
+        await manager._on_bar("SPY", FakeBar(
             "SPY", close=above_tp, volume=500,
             high=above_tp + 0.1, low=above_tp - 0.1,
-        )))
+        ))
 
         assert len(mock.market_sells) == 1
         assert not manager.pos_tracker.is_open("SPY")
 
-    def test_no_duplicate_entry(self, session):
+    @pytest.mark.asyncio
+    async def test_no_duplicate_entry(self, session):
         manager, mock = session
-        feed_orb_bars(manager)
+        await feed_orb_bars(manager)
         finalise_orb(manager)
 
         breakout = FakeBar(
             "SPY", close=ENTRY_PRICE, volume=int(ORB_BASE_VOL * 1.5),
             high=452.0, low=450.5,
         )
-        run(manager._on_bar("SPY", breakout))
-        run(manager._on_bar("SPY", breakout))
+        await manager._on_bar("SPY", breakout)
+        await manager._on_bar("SPY", breakout)
 
         assert len(mock.bracket_buys) == 1

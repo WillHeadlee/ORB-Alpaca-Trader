@@ -106,12 +106,23 @@ def _sync_fills(db: Session) -> None:
                         existing.alpaca_order_id = order_id
                     continue
 
-                # Find matching BUY for PnL (heuristic — bracket child IDs differ from parent)
+                # Find parent BUY via stored leg IDs (deterministic), fallback to heuristic
+                from sqlalchemy import or_
                 buy = db.query(Trade).filter(
                     Trade.symbol == symbol,
                     Trade.action == 'BUY',
                     Trade.exit_price.is_(None),
-                ).order_by(Trade.timestamp.desc()).first()
+                    or_(
+                        Trade.bracket_stop_leg_id == order_id,
+                        Trade.bracket_tp_leg_id == order_id,
+                    ),
+                ).first()
+                if buy is None:
+                    buy = db.query(Trade).filter(
+                        Trade.symbol == symbol,
+                        Trade.action == 'BUY',
+                        Trade.exit_price.is_(None),
+                    ).order_by(Trade.timestamp.desc()).first()
 
                 pnl = None
                 if buy and buy.entry_price:
@@ -461,9 +472,21 @@ def test_run(db: Session = Depends(get_db), username: str = Depends(verify_token
         stop_loss=StopLossRequest(stop_price=round(levels.stop_loss, 2)),
     ))
 
+    # Extract bracket leg IDs for deterministic fill matching
+    stop_leg_id = tp_leg_id = None
+    try:
+        for leg in (order.legs or []):
+            if getattr(leg, 'stop_price', None):
+                stop_leg_id = str(leg.id)
+            else:
+                tp_leg_id = str(leg.id)
+    except Exception:
+        pass
+
     # Log to DB
     from utils.metrics import log_trade
-    log_trade(symbol, 'BUY', levels.shares, price, order_id=str(order.id))
+    log_trade(symbol, 'BUY', levels.shares, price, order_id=str(order.id),
+              stop_leg_id=stop_leg_id, tp_leg_id=tp_leg_id)
 
     db.add(SystemLog(
         level='INFO',

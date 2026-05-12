@@ -1,0 +1,2 @@
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS bracket_stop_leg_id VARCHAR(100);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS bracket_tp_leg_id VARCHAR(100);

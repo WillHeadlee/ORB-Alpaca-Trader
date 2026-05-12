@@ -206,7 +206,17 @@ class SessionManager:
                     symbol=symbol, action="ENTRY", price=price,
                     shares=levels.shares, reason=result.reason,
                 ))
-                log_trade(symbol, "BUY", levels.shares, price, order_id=str(order.id))
+                stop_leg_id = tp_leg_id = None
+                try:
+                    for leg in (order.legs or []):
+                        if getattr(leg, 'stop_price', None):
+                            stop_leg_id = str(leg.id)
+                        else:
+                            tp_leg_id = str(leg.id)
+                except Exception:
+                    pass
+                log_trade(symbol, "BUY", levels.shares, price, order_id=str(order.id),
+                          stop_leg_id=stop_leg_id, tp_leg_id=tp_leg_id)
                 log.info(
                     f"{symbol}: stop={levels.stop_loss:.2f}, "
                     f"target={levels.take_profit:.2f}"

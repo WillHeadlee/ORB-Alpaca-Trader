@@ -20,6 +20,8 @@ class Trade(Base):
     take_profit = Column(Numeric(10, 4))
     exit_reason = Column(String(100))
     alpaca_order_id = Column(String(100), nullable=True)
+    bracket_stop_leg_id = Column(String(100), nullable=True)
+    bracket_tp_leg_id = Column(String(100), nullable=True)
 
 class Position(Base):
     __tablename__ = 'positions'
