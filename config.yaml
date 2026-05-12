@@ -1,6 +1,7 @@
 trading:
   mode: paper                   # paper | live (overridden by ALPACA_MODE env var)
-  watchlist:
+  screener_top_n: 20            # how many top screener symbols to trade each day
+  watchlist:                    # fallback if screener has no data
     - SPY
     - QQQ
     - AAPL

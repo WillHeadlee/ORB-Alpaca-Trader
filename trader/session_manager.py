@@ -20,11 +20,45 @@ from utils.time_utils import (
 )
 
 
+def _load_screener_watchlist(top_n: int = 20) -> list[str]:
+    """Return today's top symbols from the screener DB, or [] on any failure."""
+    try:
+        from sqlalchemy import func
+        from backend.database import SessionLocal
+        from backend.models import ScreenerResult
+        db = SessionLocal()
+        try:
+            latest = db.query(func.max(ScreenerResult.scan_timestamp)).scalar()
+            if not latest:
+                return []
+            symbols = (
+                db.query(ScreenerResult.symbol)
+                .filter(ScreenerResult.scan_timestamp == latest)
+                .order_by(ScreenerResult.score.desc())
+                .limit(top_n)
+                .all()
+            )
+            return [row.symbol for row in symbols]
+        finally:
+            db.close()
+    except Exception as exc:
+        log.warning(f"Could not load screener watchlist: {exc}")
+        return []
+
+
 class SessionManager:
     def __init__(self, config: dict[str, Any]) -> None:
         self.cfg = config
         self.strategy = config["strategy"]
-        self.watchlist: list[str] = config["trading"]["watchlist"]
+
+        top_n = config["trading"].get("screener_top_n", 20)
+        screener = _load_screener_watchlist(top_n)
+        if screener:
+            log.info(f"Watchlist loaded from screener ({len(screener)} symbols): {screener}")
+            self.watchlist = screener
+        else:
+            log.info(f"No screener data — using config watchlist: {config['trading']['watchlist']}")
+            self.watchlist: list[str] = config["trading"]["watchlist"]
 
         self.client = AlpacaClient()
         self.orb_tracker = OpeningRangeTracker(self.watchlist)
