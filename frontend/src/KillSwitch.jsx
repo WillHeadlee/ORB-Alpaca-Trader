@@ -5,18 +5,13 @@ function KillSwitch({ positions, onKill }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleKillSwitch = async () => {
-    if (!showConfirm) {
-      setShowConfirm(true);
-      return;
-    }
-
+  const handleKill = async () => {
+    if (!showConfirm) { setShowConfirm(true); return; }
     setLoading(true);
     try {
       await api.killSwitch();
       setShowConfirm(false);
       onKill();
-      alert('All positions closed successfully');
     } catch (err) {
       alert('Failed to close positions: ' + err.message);
     } finally {
@@ -24,43 +19,40 @@ function KillSwitch({ positions, onKill }) {
     }
   };
 
-  return (
-    <div className="bg-gray-800 p-6 rounded-lg mb-8 flex items-center justify-between">
-      <div>
-        <h2 className="text-xl font-bold mb-2">Emergency Controls</h2>
-        <p className="text-gray-400">Close all open positions immediately</p>
-      </div>
+  const hasPositions = positions.length > 0;
 
-      {!showConfirm ? (
-        <button
-          onClick={handleKillSwitch}
-          disabled={positions.length === 0}
-          className={`px-8 py-4 text-2xl font-bold rounded-lg shadow-lg transition-all ${
-            positions.length > 0
-              ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
-              : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-          }`}
-        >
-          CLOSE ALL POSITIONS
-        </button>
-      ) : (
-        <div className="flex gap-4">
-          <button
-            onClick={handleKillSwitch}
-            disabled={loading}
-            className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg"
-          >
-            {loading ? 'Closing...' : `YES, CLOSE ${positions.length} POSITIONS`}
-          </button>
+  return (
+    <div className="flex items-center justify-between px-4 py-3 bg-zinc-900 border border-zinc-800 rounded mb-4">
+      <div>
+        <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Emergency</span>
+        <p className="text-sm text-white mt-0.5">
+          {hasPositions ? `${positions.length} open position${positions.length > 1 ? 's' : ''}` : 'No open positions'}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {showConfirm && (
           <button
             onClick={() => setShowConfirm(false)}
             disabled={loading}
-            className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded-lg"
+            className="px-3 py-1.5 text-xs text-zinc-400 border border-zinc-700 rounded hover:border-zinc-500 transition-colors"
           >
             Cancel
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={handleKill}
+          disabled={!hasPositions || loading}
+          className={`px-4 py-1.5 text-xs font-mono font-semibold rounded transition-colors ${
+            !hasPositions
+              ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+              : showConfirm
+              ? 'bg-red-600 text-white hover:bg-red-500'
+              : 'bg-red-950 text-red-400 border border-red-800 hover:bg-red-900'
+          }`}
+        >
+          {loading ? 'CLOSING...' : showConfirm ? `CONFIRM — CLOSE ${positions.length}` : 'CLOSE ALL'}
+        </button>
+      </div>
     </div>
   );
 }
