@@ -15,3 +15,8 @@ env/
 logs/*.log
 .pytest_cache/
 .mypy_cache/
+frontend/node_modules/
+frontend/dist/
+orb-trader-v2-spec.md
+deploy.sh
+.claude/
