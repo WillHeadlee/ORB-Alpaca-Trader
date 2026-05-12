@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import api from './api';
 
 function KillSwitch({ positions, onKill }) {
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [armed, setArmed] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleKill = async () => {
-    if (!showConfirm) { setShowConfirm(true); return; }
+  const hasPositions = positions.length > 0;
+
+  const handleClick = async () => {
+    if (!armed) { setArmed(true); return; }
     setLoading(true);
     try {
       await api.killSwitch();
-      setShowConfirm(false);
+      setArmed(false);
       onKill();
     } catch (err) {
       alert('Failed to close positions: ' + err.message);
@@ -19,38 +21,54 @@ function KillSwitch({ positions, onKill }) {
     }
   };
 
-  const hasPositions = positions.length > 0;
-
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-zinc-900 border border-zinc-800 rounded mb-4">
-      <div>
-        <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Emergency</span>
-        <p className="text-sm text-white mt-0.5">
-          {hasPositions ? `${positions.length} open position${positions.length > 1 ? 's' : ''}` : 'No open positions'}
-        </p>
+    <div className="panel" style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '10px 16px',
+      borderColor: armed ? 'rgba(255,45,85,0.4)' : 'var(--border)',
+      transition: 'border-color 0.3s',
+      background: armed ? 'rgba(61,0,14,0.4)' : 'var(--panel)',
+    }}>
+      {/* Left: label + position count */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="sect-label" style={{ color: 'rgba(255,45,85,0.6)', letterSpacing: '0.22em' }}>
+          EMERGENCY
+        </div>
+        <div style={{
+          width: 1,
+          height: 16,
+          background: 'var(--border-hi)',
+        }} />
+        <div style={{ fontSize: 12, color: 'var(--cream-mid)', fontFamily: '"IBM Plex Mono", monospace' }}>
+          {hasPositions
+            ? <><span style={{ color: 'var(--cream)' }}>{positions.length}</span> open position{positions.length !== 1 ? 's' : ''}</>
+            : 'no open positions'}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        {showConfirm && (
+
+      {/* Right: buttons */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {armed && (
           <button
-            onClick={() => setShowConfirm(false)}
+            onClick={() => setArmed(false)}
             disabled={loading}
-            className="px-3 py-1.5 text-xs text-zinc-400 border border-zinc-700 rounded hover:border-zinc-500 transition-colors"
+            className="btn-ghost"
           >
-            Cancel
+            CANCEL
           </button>
         )}
         <button
-          onClick={handleKill}
+          onClick={handleClick}
           disabled={!hasPositions || loading}
-          className={`px-4 py-1.5 text-xs font-mono font-semibold rounded transition-colors ${
-            !hasPositions
-              ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
-              : showConfirm
-              ? 'bg-red-600 text-white hover:bg-red-500'
-              : 'bg-red-950 text-red-400 border border-red-800 hover:bg-red-900'
-          }`}
+          className={armed ? 'btn-kill-armed' : 'btn-kill-idle'}
         >
-          {loading ? 'CLOSING...' : showConfirm ? `CONFIRM — CLOSE ${positions.length}` : 'CLOSE ALL'}
+          {loading
+            ? 'CLOSING...'
+            : armed
+            ? `CONFIRM — CLOSE ${positions.length}`
+            : 'CLOSE ALL'}
         </button>
       </div>
     </div>

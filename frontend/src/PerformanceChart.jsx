@@ -4,64 +4,100 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
 
+const MONO = '"IBM Plex Mono", "Courier New", monospace';
+
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const val = payload[0].value;
+  const color = val >= 0 ? 'var(--green)' : 'var(--red)';
+  return (
+    <div style={{
+      background: 'var(--panel-alt)',
+      border: '1px solid var(--border-hi)',
+      padding: '8px 12px',
+      fontFamily: MONO,
+    }}>
+      <div style={{ fontSize: 10, letterSpacing: '0.1em', color: 'var(--cream-mid)', marginBottom: 4 }}>
+        {new Date(label).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+      </div>
+      <div style={{ fontSize: 14, color, fontFamily: '"Share Tech Mono", monospace' }}>
+        {val >= 0 ? '+' : ''}${val.toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
 function PerformanceChart({ data }) {
   if (!data || data.length === 0) {
     return (
-      <p className="text-center text-zinc-600 text-sm font-mono py-8">No data yet</p>
+      <div style={{
+        height: 200,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: MONO,
+        fontSize: 12,
+        color: 'var(--cream-dim)',
+        letterSpacing: '0.12em',
+      }}>
+        NO DATA — RUNS AFTER MARKET CLOSE
+      </div>
     );
   }
 
-  const min = Math.min(...data.map(d => d.cumulative_pnl));
   const isPositive = data[data.length - 1]?.cumulative_pnl >= 0;
-  const stroke = isPositive ? '#34d399' : '#f87171';
-  const fill = isPositive ? '#064e3b' : '#450a0a';
+  const stroke = isPositive ? 'var(--green)' : 'var(--red)';
+  const gradId  = isPositive ? 'gradGreen' : 'gradRed';
+  const stopColor = isPositive ? '#00cc6a' : '#ff2d55';
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={210}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
         <defs>
-          <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={stroke} stopOpacity={0.2} />
-            <stop offset="95%" stopColor={stroke} stopOpacity={0} />
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={stopColor} stopOpacity={0.22} />
+            <stop offset="100%" stopColor={stopColor} stopOpacity={0.01} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+
+        <CartesianGrid
+          strokeDasharray="0"
+          stroke="var(--border-hi)"
+          vertical={false}
+          horizontal={true}
+        />
+
         <XAxis
           dataKey="date"
-          stroke="#52525b"
-          tick={{ fontSize: 10, fontFamily: 'monospace' }}
+          stroke="var(--border-glow)"
+          tick={{ fontSize: 9, fontFamily: MONO, fill: 'var(--cream-mid)', letterSpacing: '0.05em' }}
           tickFormatter={(d) => new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric' })}
           tickLine={false}
           axisLine={false}
+          tickMargin={6}
         />
+
         <YAxis
-          stroke="#52525b"
-          tick={{ fontSize: 10, fontFamily: 'monospace' }}
-          tickFormatter={(v) => `$${v >= 0 ? '+' : ''}${v.toFixed(0)}`}
+          stroke="var(--border-glow)"
+          tick={{ fontSize: 9, fontFamily: MONO, fill: 'var(--cream-mid)' }}
+          tickFormatter={(v) => `${v >= 0 ? '+' : ''}$${v.toFixed(0)}`}
           tickLine={false}
           axisLine={false}
-          width={60}
+          width={55}
         />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: '#18181b',
-            border: '1px solid #3f3f46',
-            borderRadius: '4px',
-            fontSize: '12px',
-            fontFamily: 'monospace',
-          }}
-          labelStyle={{ color: '#71717a' }}
-          formatter={(v) => [`${v >= 0 ? '+' : ''}$${v.toFixed(2)}`, 'Cumulative']}
-          labelFormatter={(d) => new Date(d).toLocaleDateString()}
-        />
-        <ReferenceLine y={0} stroke="#3f3f46" strokeDasharray="3 3" />
+
+        <Tooltip content={<CustomTooltip />} />
+
+        <ReferenceLine y={0} stroke="var(--border-glow)" strokeDasharray="4 4" />
+
         <Area
           type="monotone"
           dataKey="cumulative_pnl"
           stroke={stroke}
           strokeWidth={1.5}
-          fill="url(#pnlGrad)"
+          fill={`url(#${gradId})`}
           dot={false}
+          activeDot={{ r: 3, fill: stroke, strokeWidth: 0 }}
         />
       </AreaChart>
     </ResponsiveContainer>

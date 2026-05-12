@@ -1,54 +1,129 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import PerformanceChart from './PerformanceChart';
 import KillSwitch from './KillSwitch';
 import api from './api';
 
-function StatCard({ label, value, sub, positive }) {
-  const color =
-    positive === true ? 'text-emerald-400' :
-    positive === false ? 'text-red-400' :
-    'text-white';
+/* ─── helpers ─────────────────────────────────────────── */
+
+function fmt(val) {
+  const n = parseFloat(val) || 0;
+  const sign = n >= 0 ? '+' : '-';
+  return `${sign}$${Math.abs(n).toFixed(2)}`;
+}
+
+function pnlClass(val) {
+  if (val > 0) return 'glow-green';
+  if (val < 0) return 'glow-red';
+  return '';
+}
+
+function useClock() {
+  const [time, setTime] = useState('');
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      setTime(now.toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'America/New_York',
+      }) + ' ET');
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return time;
+}
+
+/* ─── stat card ───────────────────────────────────────── */
+
+function StatCard({ label, value, sub, colorClass }) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded p-4">
-      <p className="text-xs text-zinc-500 uppercase tracking-widest font-mono mb-1">{label}</p>
-      <p className={`text-xl font-mono font-semibold ${color}`}>{value}</p>
-      {sub && <p className="text-xs text-zinc-600 mt-1 font-mono">{sub}</p>}
+    <div className="panel" style={{ padding: '16px 18px' }}>
+      <div className="sect-label" style={{ marginBottom: 10 }}>{label}</div>
+      <div className={`stat-num font-display ${colorClass || ''}`}>{value}</div>
+      {sub && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 10,
+          color: 'var(--cream-mid)',
+          fontFamily: '"IBM Plex Mono", monospace',
+          letterSpacing: '0.06em',
+        }}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
 
-function StatusDot({ active }) {
+/* ─── section header ──────────────────────────────────── */
+
+function SectionHeader({ label, right }) {
   return (
-    <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${active ? 'bg-emerald-500' : 'bg-red-500'}`} />
+    <div className="panel-header">
+      <span className="sect-label">{label}</span>
+      <div style={{
+        flex: 1,
+        height: 1,
+        background: 'var(--border-hi)',
+        marginLeft: 8,
+        marginRight: right ? 8 : 0,
+      }} />
+      {right && (
+        <span style={{
+          fontSize: 10,
+          color: 'var(--cream-mid)',
+          fontFamily: '"IBM Plex Mono", monospace',
+          letterSpacing: '0.06em',
+          flexShrink: 0,
+        }}>
+          {right}
+        </span>
+      )}
+    </div>
   );
 }
 
-function pnlColor(val) {
-  if (val > 0) return 'text-emerald-400';
-  if (val < 0) return 'text-red-400';
-  return 'text-zinc-400';
+/* ─── loading screen ──────────────────────────────────── */
+
+function LoadingScreen() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'var(--void)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'column',
+      gap: 14,
+    }}>
+      <div className="font-display glow-amber" style={{ fontSize: 18, letterSpacing: '0.12em' }}>
+        ORB//TRADER
+      </div>
+      <div className="sect-label" style={{ color: 'var(--cream-mid)' }}>
+        LOADING MARKET DATA...
+      </div>
+    </div>
+  );
 }
 
-function fmt(val) {
-  const n = parseFloat(val) || 0;
-  return (n >= 0 ? '+' : '') + '$' + Math.abs(n).toFixed(2);
-}
+/* ─── Dashboard ───────────────────────────────────────── */
 
 function Dashboard({ onLogout }) {
-  const [status, setStatus] = useState(null);
-  const [trades, setTrades] = useState([]);
-  const [performance, setPerformance] = useState(null);
-  const [screener, setScreener] = useState([]);
-  const [tab, setTab] = useState('trades');
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus]       = useState(null);
+  const [trades, setTrades]       = useState([]);
+  const [performance, setPerf]    = useState(null);
+  const [screener, setScreener]   = useState([]);
+  const [tab, setTab]             = useState('trades');
+  const [loading, setLoading]     = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const clock = useClock();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [s, t, p, sc] = await Promise.all([
         api.getStatus(),
@@ -58,102 +133,178 @@ function Dashboard({ onLogout }) {
       ]);
       setStatus(s);
       setTrades(t.trades);
-      setPerformance(p);
+      setPerf(p);
       setScreener(sc.results);
       setLoading(false);
+      setRefreshKey(k => k + 1);
     } catch (err) {
       console.error(err);
+      setLoading(false);
     }
-  };
+  }, []);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <p className="text-zinc-500 text-sm font-mono">Loading...</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    loadData();
+    const id = setInterval(loadData, 5000);
+    return () => clearInterval(id);
+  }, [loadData]);
 
-  const running = status?.bot_status === 'running';
-  const pnl30 = performance?.total_pnl ?? 0;
+  if (loading) return <LoadingScreen />;
+
+  const running  = status?.bot_status === 'running';
+  const pnl30    = performance?.total_pnl ?? 0;
   const todayPnl = status?.today_pnl ?? 0;
-  const winRate = (performance?.win_rate ?? 0) * 100;
+  const winRate  = (performance?.win_rate ?? 0) * 100;
+  const balance  = status?.account_balance ?? 0;
+  const mode     = status?.mode ?? 'paper';
+  const positions = status?.positions ?? [];
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Top bar */}
-      <div className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="text-sm font-mono font-semibold tracking-wide">ORB TRADER</span>
-          <div className="flex items-center gap-1 text-xs font-mono text-zinc-400">
-            <StatusDot active={running} />
-            {running ? 'LIVE' : 'STOPPED'}
+    <div style={{ minHeight: '100vh', background: 'var(--void)', display: 'flex', flexDirection: 'column' }}>
+
+      {/* ── TOP BAR ── */}
+      <header style={{
+        background: 'var(--panel)',
+        borderBottom: '1px solid var(--border)',
+        padding: '0 20px',
+        height: 46,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
+        {/* Left */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <span className="font-display glow-amber" style={{ fontSize: 15, letterSpacing: '0.10em' }}>
+            ORB//TRADER
+          </span>
+
+          <div style={{ width: 1, height: 16, background: 'var(--border-hi)' }} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <div className={running ? 'dot-live' : 'dot-stopped'} />
+            <span className="sect-label" style={{
+              color: running ? 'var(--green)' : 'var(--red)',
+              fontSize: 9,
+            }}>
+              {running ? 'LIVE' : 'STOPPED'}
+            </span>
           </div>
-          <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-900">
-            {status?.mode?.toUpperCase()}
+
+          <span className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}>
+            {mode.toUpperCase()}
           </span>
         </div>
-        <button
-          onClick={onLogout}
-          className="text-xs text-zinc-500 hover:text-zinc-300 font-mono transition-colors"
-        >
-          Sign out
-        </button>
-      </div>
 
-      <div className="px-6 py-4 space-y-4">
-        {/* Stats row */}
-        <div className="grid grid-cols-4 gap-3">
+        {/* Right */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
+          <span style={{
+            fontFamily: '"IBM Plex Mono", monospace',
+            fontSize: 11,
+            color: 'var(--cream-mid)',
+            letterSpacing: '0.08em',
+          }}>
+            {clock}
+          </span>
+          <span style={{
+            fontFamily: '"Share Tech Mono", monospace',
+            fontSize: 14,
+            letterSpacing: '0.04em',
+            color: 'var(--cream)',
+          }}>
+            ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </span>
+          <button
+            onClick={onLogout}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 9,
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              color: 'var(--cream-dim)',
+              transition: 'color 0.15s',
+              padding: 0,
+            }}
+            onMouseEnter={e => e.target.style.color = 'var(--cream-mid)'}
+            onMouseLeave={e => e.target.style.color = 'var(--cream-dim)'}
+          >
+            SIGN OUT
+          </button>
+        </div>
+      </header>
+
+      {/* ── BODY ── */}
+      <main style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+        {/* ── STAT CARDS ── */}
+        <div key={`stats-${refreshKey}`} className="data-refresh" style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: 10,
+        }}>
           <StatCard
             label="Today P&L"
             value={fmt(todayPnl)}
-            positive={todayPnl > 0 ? true : todayPnl < 0 ? false : undefined}
+            colorClass={pnlClass(todayPnl) || 'glow-cream'}
           />
           <StatCard
             label="30-Day P&L"
             value={fmt(pnl30)}
-            sub={`${performance?.total_trades ?? 0} trades`}
-            positive={pnl30 > 0 ? true : pnl30 < 0 ? false : undefined}
+            sub={`${performance?.total_trades ?? 0} TRADES`}
+            colorClass={pnlClass(pnl30) || 'glow-cream'}
           />
           <StatCard
             label="Win Rate"
             value={`${winRate.toFixed(1)}%`}
-            sub={`${performance?.winning_trades ?? 0}W / ${performance?.losing_trades ?? 0}L`}
-            positive={winRate >= 50 ? true : winRate > 0 ? false : undefined}
+            sub={`${performance?.winning_trades ?? 0}W · ${performance?.losing_trades ?? 0}L`}
+            colorClass={winRate >= 50 ? 'glow-green' : winRate > 0 ? 'glow-red' : ''}
           />
           <StatCard
-            label="Balance"
-            value={`$${(status?.account_balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            label="Equity"
+            value={`$${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            colorClass="glow-cream"
           />
         </div>
 
-        {/* Kill switch */}
-        <KillSwitch positions={status?.positions ?? []} onKill={loadData} />
+        {/* ── KILL SWITCH ── */}
+        <KillSwitch positions={positions} onKill={loadData} />
 
-        {/* Positions */}
-        {(status?.positions?.length ?? 0) > 0 && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded">
-            <div className="px-4 py-2 border-b border-zinc-800">
-              <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Open Positions</span>
-            </div>
-            <table className="w-full text-sm font-mono">
+        {/* ── PERFORMANCE CHART ── */}
+        <div className="panel">
+          <SectionHeader
+            label="Cumulative P&L"
+            right={`30D · ${pnl30 >= 0 ? '+' : ''}$${pnl30.toFixed(2)}`}
+          />
+          <div style={{ padding: '10px 8px 8px' }}>
+            <PerformanceChart data={performance?.daily_pnl ?? []} />
+          </div>
+        </div>
+
+        {/* ── OPEN POSITIONS ── */}
+        {positions.length > 0 && (
+          <div className="panel">
+            <SectionHeader label="Open Positions" right={`${positions.length} ACTIVE`} />
+            <table className="term-table">
               <thead>
-                <tr className="text-left text-xs text-zinc-600 border-b border-zinc-800">
-                  <th className="px-4 py-2">Symbol</th>
-                  <th className="px-4 py-2">Qty</th>
-                  <th className="px-4 py-2">Entry</th>
-                  <th className="px-4 py-2">Current</th>
-                  <th className="px-4 py-2 text-right">Unreal. P&L</th>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Qty</th>
+                  <th>Entry</th>
+                  <th>Current</th>
+                  <th className="right">Unrealized P&amp;L</th>
                 </tr>
               </thead>
               <tbody>
-                {status.positions.map((p) => (
-                  <tr key={p.symbol} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                    <td className="px-4 py-2.5 font-semibold">{p.symbol}</td>
-                    <td className="px-4 py-2.5 text-zinc-400">{p.quantity}</td>
-                    <td className="px-4 py-2.5 text-zinc-400">${p.entry_price.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-zinc-400">${p.current_price.toFixed(2)}</td>
-                    <td className={`px-4 py-2.5 text-right ${pnlColor(p.unrealized_pnl)}`}>
+                {positions.map((p) => (
+                  <tr key={p.symbol}>
+                    <td className="sym">{p.symbol}</td>
+                    <td className="dim">{p.quantity}</td>
+                    <td className="dim">${p.entry_price.toFixed(2)}</td>
+                    <td className="dim">${p.current_price.toFixed(2)}</td>
+                    <td className={`right ${pnlClass(p.unrealized_pnl)}`}>
                       {fmt(p.unrealized_pnl)}
                     </td>
                   </tr>
@@ -163,64 +314,86 @@ function Dashboard({ onLogout }) {
           </div>
         )}
 
-        {/* Chart */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded">
-          <div className="px-4 py-2 border-b border-zinc-800">
-            <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Cumulative P&L — 30 Days</span>
-          </div>
-          <div className="p-4">
-            <PerformanceChart data={performance?.daily_pnl ?? []} />
-          </div>
-        </div>
+        {/* ── TRADE LOG / SCREENER ── */}
+        <div className="panel" style={{ flex: 1 }}>
+          {/* Tabs */}
+          <div style={{
+            display: 'flex',
+            borderBottom: '1px solid var(--border)',
+            paddingLeft: 4,
+          }}>
+            <button
+              className={`tab-btn ${tab === 'trades' ? 'active' : ''}`}
+              onClick={() => setTab('trades')}
+            >
+              Trade Log
+            </button>
+            <button
+              className={`tab-btn ${tab === 'screener' ? 'active' : ''}`}
+              onClick={() => setTab('screener')}
+            >
+              Screener
+            </button>
 
-        {/* Tabs */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded">
-          <div className="flex border-b border-zinc-800">
-            {['trades', 'screener'].map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-4 py-2.5 text-xs font-mono uppercase tracking-widest transition-colors ${
-                  tab === t
-                    ? 'text-white border-b border-white -mb-px'
-                    : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                {t === 'trades' ? 'Trade Log' : 'Screener'}
-              </button>
-            ))}
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 14 }}>
+              {tab === 'trades' && trades.length > 0 && (
+                <span className="sect-label" style={{ color: 'var(--cream-mid)' }}>
+                  {trades.length} RECORDS
+                </span>
+              )}
+              {tab === 'screener' && screener.length > 0 && (
+                <span className="sect-label" style={{ color: 'var(--cream-mid)' }}>
+                  TOP {Math.min(screener.length, 20)}
+                </span>
+              )}
+            </div>
           </div>
 
+          {/* Trade Log */}
           {tab === 'trades' && (
-            <div className="max-h-80 overflow-y-auto">
+            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {trades.length === 0 ? (
-                <p className="px-4 py-8 text-center text-zinc-600 text-sm font-mono">No trades yet</p>
+                <div style={{
+                  padding: '40px 0',
+                  textAlign: 'center',
+                  fontFamily: '"IBM Plex Mono", monospace',
+                  fontSize: 11,
+                  color: 'var(--cream-dim)',
+                  letterSpacing: '0.12em',
+                }}>
+                  NO TRADES RECORDED
+                </div>
               ) : (
-                <table className="w-full text-sm font-mono">
-                  <thead className="sticky top-0 bg-zinc-900">
-                    <tr className="text-left text-xs text-zinc-600 border-b border-zinc-800">
-                      <th className="px-4 py-2">Time</th>
-                      <th className="px-4 py-2">Symbol</th>
-                      <th className="px-4 py-2">Side</th>
-                      <th className="px-4 py-2">Qty</th>
-                      <th className="px-4 py-2">Price</th>
-                      <th className="px-4 py-2 text-right">P&L</th>
+                <table className="term-table">
+                  <thead>
+                    <tr style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}>
+                      <th>Time</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Qty</th>
+                      <th>Price</th>
+                      <th className="right">P&amp;L</th>
                     </tr>
                   </thead>
                   <tbody>
                     {trades.map((t) => (
-                      <tr key={t.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                        <td className="px-4 py-2 text-zinc-500">
-                          {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <tr key={t.id}>
+                        <td className="dim" style={{ fontSize: 11 }}>
+                          {new Date(t.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit', minute: '2-digit', hour12: false,
+                          })}
                         </td>
-                        <td className="px-4 py-2 font-semibold">{t.symbol}</td>
-                        <td className={`px-4 py-2 ${t.action === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <td className="sym">{t.symbol}</td>
+                        <td style={{
+                          color: t.action === 'BUY' ? 'var(--green)' : 'var(--red)',
+                          letterSpacing: '0.06em',
+                        }}>
                           {t.action}
                         </td>
-                        <td className="px-4 py-2 text-zinc-400">{t.quantity}</td>
-                        <td className="px-4 py-2 text-zinc-400">${t.entry_price.toFixed(2)}</td>
-                        <td className={`px-4 py-2 text-right ${pnlColor(t.pnl)}`}>
-                          {t.pnl !== 0 ? fmt(t.pnl) : '—'}
+                        <td className="dim">{t.quantity}</td>
+                        <td className="dim">${t.entry_price.toFixed(2)}</td>
+                        <td className={`right ${pnlClass(t.pnl)}`}>
+                          {t.pnl !== 0 ? fmt(t.pnl) : <span style={{ color: 'var(--cream-dim)' }}>—</span>}
                         </td>
                       </tr>
                     ))}
@@ -230,31 +403,43 @@ function Dashboard({ onLogout }) {
             </div>
           )}
 
+          {/* Screener */}
           {tab === 'screener' && (
-            <div className="max-h-80 overflow-y-auto">
+            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {screener.length === 0 ? (
-                <p className="px-4 py-8 text-center text-zinc-600 text-sm font-mono">No scan data — runs at 9:15 AM ET</p>
+                <div style={{
+                  padding: '40px 0',
+                  textAlign: 'center',
+                  fontFamily: '"IBM Plex Mono", monospace',
+                  fontSize: 11,
+                  color: 'var(--cream-dim)',
+                  letterSpacing: '0.12em',
+                }}>
+                  NO SCAN DATA — RUNS AT 09:15 ET
+                </div>
               ) : (
-                <table className="w-full text-sm font-mono">
-                  <thead className="sticky top-0 bg-zinc-900">
-                    <tr className="text-left text-xs text-zinc-600 border-b border-zinc-800">
-                      <th className="px-4 py-2">#</th>
-                      <th className="px-4 py-2">Symbol</th>
-                      <th className="px-4 py-2">Price</th>
-                      <th className="px-4 py-2">Avg Vol</th>
-                      <th className="px-4 py-2">Volatility</th>
-                      <th className="px-4 py-2 text-right">Score</th>
+                <table className="term-table">
+                  <thead>
+                    <tr style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}>
+                      <th>#</th>
+                      <th>Symbol</th>
+                      <th>Price</th>
+                      <th>Avg Vol</th>
+                      <th>Volatility</th>
+                      <th className="right">Score</th>
                     </tr>
                   </thead>
                   <tbody>
                     {screener.slice(0, 20).map((s, i) => (
-                      <tr key={s.symbol} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                        <td className="px-4 py-2 text-zinc-600">{i + 1}</td>
-                        <td className="px-4 py-2 font-semibold">{s.symbol}</td>
-                        <td className="px-4 py-2 text-zinc-400">${s.price?.toFixed(2)}</td>
-                        <td className="px-4 py-2 text-zinc-400">{(s.avg_volume / 1e6).toFixed(1)}M</td>
-                        <td className="px-4 py-2 text-zinc-400">{s.volatility?.toFixed(2)}%</td>
-                        <td className="px-4 py-2 text-right text-emerald-400">{s.score?.toFixed(2)}</td>
+                      <tr key={s.symbol}>
+                        <td style={{ color: 'var(--cream-dim)', fontSize: 11 }}>{i + 1}</td>
+                        <td className="sym">{s.symbol}</td>
+                        <td className="dim">${s.price?.toFixed(2)}</td>
+                        <td className="dim">{(s.avg_volume / 1e6).toFixed(1)}M</td>
+                        <td className="dim">{s.volatility?.toFixed(2)}%</td>
+                        <td className="right glow-amber" style={{ fontSize: 13 }}>
+                          {s.score?.toFixed(2)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -263,7 +448,8 @@ function Dashboard({ onLogout }) {
             </div>
           )}
         </div>
-      </div>
+
+      </main>
     </div>
   );
 }
