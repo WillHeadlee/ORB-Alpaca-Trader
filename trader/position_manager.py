@@ -18,21 +18,24 @@ def calculate_shares(
     entry_price: float,
     stop_loss_pct: float,
     risk_per_trade_pct: float,
+    max_position_pct: float = 20.0,
 ) -> int:
     """
-    Return the number of whole shares to buy so that hitting stop-loss
-    costs at most risk_per_trade_pct % of equity.
+    Return shares sized so stop-loss costs at most risk_per_trade_pct % of equity,
+    capped so total position cost never exceeds max_position_pct % of equity.
 
     stop_loss_distance = entry_price * stop_loss_pct / 100
     max_dollar_risk    = equity * risk_per_trade_pct / 100
     shares             = floor(max_dollar_risk / stop_loss_distance)
+    capped at          = floor(equity * max_position_pct / 100 / entry_price)
     """
     if entry_price <= 0 or stop_loss_pct <= 0:
         return 0
     stop_distance = entry_price * stop_loss_pct / 100.0
     max_risk = equity * risk_per_trade_pct / 100.0
     shares = int(max_risk / stop_distance)
-    return max(shares, 0)
+    max_shares = int(equity * max_position_pct / 100.0 / entry_price)
+    return max(min(shares, max_shares), 0)
 
 
 def build_levels(
@@ -42,8 +45,9 @@ def build_levels(
     stop_loss_pct: float,
     risk_per_trade_pct: float,
     reward_risk_ratio: float,
+    max_position_pct: float = 20.0,
 ) -> PositionLevels:
-    shares = calculate_shares(equity, entry_price, stop_loss_pct, risk_per_trade_pct)
+    shares = calculate_shares(equity, entry_price, stop_loss_pct, risk_per_trade_pct, max_position_pct)
     stop_distance = entry_price * stop_loss_pct / 100.0
     stop_loss = entry_price - stop_distance
     take_profit = entry_price + stop_distance * reward_risk_ratio

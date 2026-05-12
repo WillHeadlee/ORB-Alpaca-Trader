@@ -191,6 +191,7 @@ class SessionManager:
                 stop_loss_pct=self.strategy["stop_loss_pct"],
                 risk_per_trade_pct=self.strategy["risk_per_trade_pct"],
                 reward_risk_ratio=self.strategy["reward_risk_ratio"],
+                max_position_pct=self.strategy.get("max_position_pct", 20.0),
             )
             if levels.shares < 1:
                 log.warning(f"{symbol}: calculated 0 shares, skipping entry")

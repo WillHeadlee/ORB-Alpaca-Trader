@@ -11,6 +11,7 @@ trading:
 strategy:
   opening_range_minutes: 15     # 15 or 30
   risk_per_trade_pct: 1.5       # % of account equity to risk per trade
+  max_position_pct: 20.0        # max % of equity in any single position
   stop_loss_pct: 0.5            # % below entry price for stop-loss
   reward_risk_ratio: 2.0        # take-profit = stop_loss_distance * ratio
   hard_close_time: "15:55"      # ET — force-close all positions at this time

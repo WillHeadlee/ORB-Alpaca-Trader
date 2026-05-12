@@ -321,6 +321,7 @@ def test_run(db: Session = Depends(get_db), username: str = Depends(verify_token
         stop_loss_pct=strategy['stop_loss_pct'],
         risk_per_trade_pct=strategy['risk_per_trade_pct'],
         reward_risk_ratio=strategy['reward_risk_ratio'],
+        max_position_pct=strategy.get('max_position_pct', 20.0),
     )
     if levels.shares < 1:
         raise HTTPException(status_code=400, detail=f"Position size is 0 shares for {symbol} at ${price:.2f}")
