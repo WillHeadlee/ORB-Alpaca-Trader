@@ -14,13 +14,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router)
-
-# Serve the built React app (enable after running: cd frontend && npm run build)
-FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
-if os.path.isdir(FRONTEND_DIST):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="static")
-
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+app.include_router(router)
+
+# Must be last — StaticFiles at "/" catches everything not matched above
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="static")
