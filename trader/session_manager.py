@@ -206,7 +206,7 @@ class SessionManager:
                     symbol=symbol, action="ENTRY", price=price,
                     shares=levels.shares, reason=result.reason,
                 ))
-                log_trade(symbol, "BUY", levels.shares, price)
+                log_trade(symbol, "BUY", levels.shares, price, order_id=str(order.id))
                 log.info(
                     f"{symbol}: stop={levels.stop_loss:.2f}, "
                     f"target={levels.take_profit:.2f}"
@@ -227,8 +227,10 @@ class SessionManager:
             pnl = (price - levels.entry_price) * levels.shares
             # Bracket legs may have already closed the position at Alpaca;
             # attempt the sell but swallow "position not found" errors.
+            sell_order_id = None
             try:
-                self.client.submit_market_sell(symbol, levels.shares)
+                sell_order = self.client.submit_market_sell(symbol, levels.shares)
+                sell_order_id = str(sell_order.id) if sell_order else None
             except Exception as exc:
                 if "position" in str(exc).lower() or "order" in str(exc).lower():
                     log.info(f"{symbol}: position already closed by broker bracket fill")
@@ -239,7 +241,7 @@ class SessionManager:
                 symbol=symbol, action="EXIT", price=price,
                 shares=levels.shares, reason=result.reason, pnl=pnl,
             ))
-            log_trade(symbol, "SELL", levels.shares, price, pnl)
+            log_trade(symbol, "SELL", levels.shares, price, pnl, order_id=sell_order_id)
 
     # ------------------------------------------------------------------
     # Scheduled tasks

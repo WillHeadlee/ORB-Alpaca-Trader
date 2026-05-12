@@ -20,6 +20,7 @@ def log_trade(
     quantity: int,
     price: float,
     pnl: Optional[float] = None,
+    order_id: Optional[str] = None,
 ) -> None:
     try:
         from backend.database import SessionLocal
@@ -35,6 +36,7 @@ def log_trade(
                 exit_price=price if action == 'SELL' else None,
                 pnl=pnl,
                 mode=_get_mode(),
+                alpaca_order_id=order_id,
             )
             db.add(trade)
             db.commit()

@@ -19,6 +19,7 @@ class Trade(Base):
     stop_loss = Column(Numeric(10, 4))
     take_profit = Column(Numeric(10, 4))
     exit_reason = Column(String(100))
+    alpaca_order_id = Column(String(100), nullable=True)
 
 class Position(Base):
     __tablename__ = 'positions'

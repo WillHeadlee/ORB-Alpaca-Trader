@@ -58,39 +58,55 @@ def _sync_fills(db: Session) -> None:
 
             fill_time = order.filled_at
             symbol = order.symbol
+            order_id = str(order.id)
 
             if order.side.value == 'buy':
-                # Update entry_price to actual fill price and recalc linked SELL pnl
+                # Find by order_id (exact) or fall back to timestamp window
                 buy = db.query(Trade).filter(
                     Trade.symbol == symbol,
                     Trade.action == 'BUY',
-                    Trade.timestamp >= fill_time - timedelta(minutes=2),
-                    Trade.timestamp <= fill_time + timedelta(minutes=2),
+                    Trade.alpaca_order_id == order_id,
                 ).first()
-                if buy and float(buy.entry_price or 0) != fill_price:
-                    buy.entry_price = fill_price
-                    # Fix pnl on any linked SELL
-                    sell = db.query(Trade).filter(
+                if buy is None:
+                    buy = db.query(Trade).filter(
                         Trade.symbol == symbol,
-                        Trade.action == 'SELL',
-                        Trade.timestamp > fill_time,
-                        Trade.exit_price.isnot(None),
-                    ).order_by(Trade.timestamp).first()
-                    if sell and sell.exit_price:
-                        sell.pnl = round((float(sell.exit_price) - fill_price) * sell.quantity, 4)
+                        Trade.action == 'BUY',
+                        Trade.timestamp >= fill_time - timedelta(minutes=2),
+                        Trade.timestamp <= fill_time + timedelta(minutes=2),
+                    ).first()
+                if buy:
+                    if buy.alpaca_order_id is None:
+                        buy.alpaca_order_id = order_id
+                    if float(buy.entry_price or 0) != fill_price:
+                        buy.entry_price = fill_price
+                        # Cascade: fix PnL on linked SELL
+                        sell = db.query(Trade).filter(
+                            Trade.symbol == symbol,
+                            Trade.action == 'SELL',
+                            Trade.timestamp > fill_time,
+                            Trade.exit_price.isnot(None),
+                        ).order_by(Trade.timestamp).first()
+                        if sell and sell.exit_price:
+                            sell.pnl = round((float(sell.exit_price) - fill_price) * sell.quantity, 4)
 
             elif order.side.value == 'sell':
-                # Skip if already logged
+                # Exact dedup by order_id; fall back to timestamp window for old records
                 existing = db.query(Trade).filter(
-                    Trade.symbol == symbol,
-                    Trade.action == 'SELL',
-                    Trade.timestamp >= fill_time - timedelta(minutes=2),
-                    Trade.timestamp <= fill_time + timedelta(minutes=2),
+                    Trade.alpaca_order_id == order_id,
                 ).first()
+                if existing is None:
+                    existing = db.query(Trade).filter(
+                        Trade.symbol == symbol,
+                        Trade.action == 'SELL',
+                        Trade.timestamp >= fill_time - timedelta(minutes=2),
+                        Trade.timestamp <= fill_time + timedelta(minutes=2),
+                    ).first()
                 if existing:
+                    if existing.alpaca_order_id is None:
+                        existing.alpaca_order_id = order_id
                     continue
 
-                # Find matching BUY and calculate PnL using actual fill price
+                # Find matching BUY for PnL (heuristic — bracket child IDs differ from parent)
                 buy = db.query(Trade).filter(
                     Trade.symbol == symbol,
                     Trade.action == 'BUY',
@@ -110,6 +126,7 @@ def _sync_fills(db: Session) -> None:
                     exit_price=fill_price,
                     pnl=pnl,
                     mode='paper' if paper else 'live',
+                    alpaca_order_id=order_id,
                 ))
 
         db.commit()
@@ -446,7 +463,7 @@ def test_run(db: Session = Depends(get_db), username: str = Depends(verify_token
 
     # Log to DB
     from utils.metrics import log_trade
-    log_trade(symbol, 'BUY', levels.shares, price)
+    log_trade(symbol, 'BUY', levels.shares, price, order_id=str(order.id))
 
     db.add(SystemLog(
         level='INFO',
