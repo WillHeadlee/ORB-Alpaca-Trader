@@ -96,8 +96,8 @@ def get_trades(
                 "symbol": t.symbol,
                 "action": t.action,
                 "quantity": t.quantity,
-                "entry_price": float(t.entry_price or 0),
-                "exit_price": float(t.exit_price or 0),
+                "entry_price": float(t.entry_price or t.exit_price or 0),
+                "exit_price": float(t.exit_price or t.entry_price or 0),
                 "pnl": float(t.pnl or 0),
                 "mode": t.mode,
             }
