@@ -13,7 +13,6 @@ class TestCalculateShares:
         shares = calculate_shares(
             equity=10_000, entry_price=100.0,
             stop_loss_pct=0.5, risk_per_trade_pct=1.5,
-            max_position_pct=100,
         )
         assert shares == 300
 
@@ -21,7 +20,6 @@ class TestCalculateShares:
         shares = calculate_shares(
             equity=1_000, entry_price=50.0,
             stop_loss_pct=0.5, risk_per_trade_pct=1.5,
-            max_position_pct=100,
         )
         assert shares == 60
 
@@ -29,7 +27,6 @@ class TestCalculateShares:
         shares = calculate_shares(
             equity=10_000, entry_price=500.0,
             stop_loss_pct=0.5, risk_per_trade_pct=1.5,
-            max_position_pct=100,
         )
         assert shares == 60
 
@@ -64,12 +61,12 @@ class TestCalculateShares:
         assert shares == 0
 
     def test_shares_are_whole_numbers(self):
-        shares = calculate_shares(10_000, 137.50, 0.5, 1.5, max_position_pct=100)
+        shares = calculate_shares(10_000, 137.50, 0.5, 1.5)
         assert isinstance(shares, int)
 
     def test_risk_scales_linearly(self):
-        shares_low = calculate_shares(10_000, 100.0, 0.5, 1.0, max_position_pct=100)
-        shares_high = calculate_shares(10_000, 100.0, 0.5, 2.0, max_position_pct=100)
+        shares_low = calculate_shares(10_000, 100.0, 0.5, 1.0)
+        shares_high = calculate_shares(10_000, 100.0, 0.5, 2.0)
         assert shares_high == shares_low * 2
 
 
@@ -82,7 +79,6 @@ class TestBuildLevels:
             stop_loss_pct=0.5,
             risk_per_trade_pct=1.5,
             reward_risk_ratio=2.0,
-            max_position_pct=100,  # disable cap for these unit tests
         )
         defaults.update(kwargs)
         return build_levels(**defaults)
