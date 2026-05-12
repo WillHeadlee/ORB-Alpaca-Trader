@@ -103,8 +103,8 @@ def make_session() -> tuple["SessionManager", "MockAlpacaClient"]:
     mock_client = MockAlpacaClient()
     with patch('trader.session_manager.AlpacaClient', return_value=mock_client), \
          patch('trader.session_manager._load_screener_watchlist', return_value=[]), \
-         patch('utils.metrics.log_trade'), \
-         patch('utils.metrics.save_daily_summary'):
+         patch('trader.session_manager.log_trade'), \
+         patch('trader.session_manager.save_daily_summary'):
         manager = SessionManager(TEST_CONFIG)
     return manager, mock_client
 
