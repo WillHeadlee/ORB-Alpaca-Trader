@@ -53,10 +53,12 @@ def scan_top_100():
         try:
             snaps = data_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch))
             for symbol, snap in snaps.items():
-                if snap.daily_bar is None:
+                # Use prev_daily_bar for volume (complete); latest_trade for price
+                bar = snap.prev_daily_bar or snap.daily_bar
+                if bar is None:
                     continue
-                price = float(snap.daily_bar.close)
-                volume = int(snap.daily_bar.volume)
+                price = float(snap.latest_trade.price) if snap.latest_trade else float(bar.close)
+                volume = int(bar.volume)
                 if PRICE_MIN <= price <= PRICE_MAX and volume >= VOLUME_MIN:
                     candidates.append(symbol)
         except Exception as e:
