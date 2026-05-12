@@ -132,9 +132,9 @@ function Dashboard({ onLogout }) {
         api.getScreenerResults(),
       ]);
       setStatus(s);
-      setTrades(t.trades);
+      setTrades(t?.trades ?? []);
       setPerf(p);
-      setScreener(sc.results);
+      setScreener(sc?.results ?? []);
       setLoading(false);
       setRefreshKey(k => k + 1);
     } catch (err) {

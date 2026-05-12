@@ -5,7 +5,8 @@ function KillSwitch({ positions, onKill }) {
   const [armed, setArmed] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const hasPositions = positions.length > 0;
+  const safePositions = positions ?? [];
+  const hasPositions = safePositions.length > 0;
 
   const handleClick = async () => {
     if (!armed) { setArmed(true); return; }
@@ -43,7 +44,7 @@ function KillSwitch({ positions, onKill }) {
         }} />
         <div style={{ fontSize: 12, color: 'var(--cream-mid)', fontFamily: '"IBM Plex Mono", monospace' }}>
           {hasPositions
-            ? <><span style={{ color: 'var(--cream)' }}>{positions.length}</span> open position{positions.length !== 1 ? 's' : ''}</>
+            ? <><span style={{ color: 'var(--cream)' }}>{safePositions.length}</span> open position{safePositions.length !== 1 ? 's' : ''}</>
             : 'no open positions'}
         </div>
       </div>
@@ -67,7 +68,7 @@ function KillSwitch({ positions, onKill }) {
           {loading
             ? 'CLOSING...'
             : armed
-            ? `CONFIRM — CLOSE ${positions.length}`
+            ? `CONFIRM — CLOSE ${safePositions.length}`
             : 'CLOSE ALL'}
         </button>
       </div>
