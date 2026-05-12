@@ -51,7 +51,7 @@ def scan_top_100():
     for i in range(0, len(symbols), BATCH_SIZE):
         batch = symbols[i:i + BATCH_SIZE]
         try:
-            snaps = data_client.get_stock_snapshots(StockSnapshotRequest(symbol_or_symbols=batch))
+            snaps = data_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch))
             for symbol, snap in snaps.items():
                 if snap.daily_bar is None:
                     continue
