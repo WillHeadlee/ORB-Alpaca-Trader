@@ -1,6 +1,10 @@
 :80 {
-    # API endpoints
-    reverse_proxy /api/* localhost:8000
+    # API endpoints — no caching
+    @api path /api/*
+    handle @api {
+        reverse_proxy localhost:8000
+        header Cache-Control "no-store"
+    }
 
     # Serve static frontend files
     root * /opt/orb-trader/frontend/dist
