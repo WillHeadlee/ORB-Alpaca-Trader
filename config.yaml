@@ -1,0 +1,16 @@
+trading:
+  mode: paper                   # paper | live (overridden by ALPACA_MODE env var)
+  watchlist:
+    - SPY
+    - QQQ
+    - AAPL
+    - TSLA
+    - NVDA
+
+strategy:
+  opening_range_minutes: 15     # 15 or 30
+  risk_per_trade_pct: 1.5       # % of account equity to risk per trade
+  stop_loss_pct: 0.5            # % below entry price for stop-loss
+  reward_risk_ratio: 2.0        # take-profit = stop_loss_distance * ratio
+  hard_close_time: "15:55"      # ET — force-close all positions at this time
+  volume_multiplier: 1.2        # breakout bar volume must exceed avg_volume * this
