@@ -42,7 +42,7 @@ def _sync_fills(db: Session) -> None:
         ))
 
         for order in orders:
-            if order.side.value != 'sell' or order.status.value != 'filled':
+            if order.status.value != 'filled':
                 continue
             fill_price = float(order.filled_avg_price or 0)
             qty = int(float(order.filled_qty or 0))
@@ -52,37 +52,49 @@ def _sync_fills(db: Session) -> None:
             fill_time = order.filled_at
             symbol = order.symbol
 
-            # Skip if already logged (within 2-minute window)
-            existing = db.query(Trade).filter(
-                Trade.symbol == symbol,
-                Trade.action == 'SELL',
-                Trade.timestamp >= fill_time - timedelta(minutes=2),
-                Trade.timestamp <= fill_time + timedelta(minutes=2),
-            ).first()
-            if existing:
-                continue
+            if order.side.value == 'buy':
+                # Update entry_price to actual fill price
+                buy = db.query(Trade).filter(
+                    Trade.symbol == symbol,
+                    Trade.action == 'BUY',
+                    Trade.timestamp >= fill_time - timedelta(minutes=2),
+                    Trade.timestamp <= fill_time + timedelta(minutes=2),
+                ).first()
+                if buy:
+                    buy.entry_price = fill_price
 
-            # Calculate PnL against most recent unmatched BUY
-            buy = db.query(Trade).filter(
-                Trade.symbol == symbol,
-                Trade.action == 'BUY',
-                Trade.exit_price.is_(None),
-            ).order_by(Trade.timestamp.desc()).first()
+            elif order.side.value == 'sell':
+                # Skip if already logged
+                existing = db.query(Trade).filter(
+                    Trade.symbol == symbol,
+                    Trade.action == 'SELL',
+                    Trade.timestamp >= fill_time - timedelta(minutes=2),
+                    Trade.timestamp <= fill_time + timedelta(minutes=2),
+                ).first()
+                if existing:
+                    continue
 
-            pnl = None
-            if buy and buy.entry_price:
-                pnl = round((fill_price - float(buy.entry_price)) * qty, 4)
-                buy.exit_price = fill_price
+                # Find matching BUY and calculate PnL using actual fill price
+                buy = db.query(Trade).filter(
+                    Trade.symbol == symbol,
+                    Trade.action == 'BUY',
+                    Trade.exit_price.is_(None),
+                ).order_by(Trade.timestamp.desc()).first()
 
-            db.add(Trade(
-                timestamp=fill_time,
-                symbol=symbol,
-                action='SELL',
-                quantity=qty,
-                exit_price=fill_price,
-                pnl=pnl,
-                mode='paper' if paper else 'live',
-            ))
+                pnl = None
+                if buy and buy.entry_price:
+                    pnl = round((fill_price - float(buy.entry_price)) * qty, 4)
+                    buy.exit_price = fill_price
+
+                db.add(Trade(
+                    timestamp=fill_time,
+                    symbol=symbol,
+                    action='SELL',
+                    quantity=qty,
+                    exit_price=fill_price,
+                    pnl=pnl,
+                    mode='paper' if paper else 'live',
+                ))
 
         db.commit()
     except Exception as e:
