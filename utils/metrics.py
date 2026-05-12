@@ -1,52 +1,17 @@
-"""SQLite performance metrics — persists every trade and daily summary."""
+"""Trade and summary persistence — writes to PostgreSQL so the dashboard sees live data."""
 
 import os
-import sqlite3
-from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-_DB_ENV = os.getenv("ORB_METRICS_DB")
-DB_PATH = Path(_DB_ENV) if _DB_ENV else Path(__file__).resolve().parent.parent / "metrics.db"
 
-
-@contextmanager
-def _conn():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        yield con
-        con.commit()
-    finally:
-        con.close()
+def _get_mode() -> str:
+    return 'paper' if os.getenv('ALPACA_PAPER', 'true').lower() != 'false' else 'live'
 
 
 def init_db() -> None:
-    with _conn() as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT    NOT NULL,
-                symbol    TEXT    NOT NULL,
-                action    TEXT    NOT NULL,
-                quantity  INTEGER NOT NULL,
-                price     REAL    NOT NULL,
-                pnl       REAL,
-                strategy  TEXT    DEFAULT 'ORB'
-            )
-        """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS daily_summary (
-                date           TEXT PRIMARY KEY,
-                total_trades   INTEGER,
-                winning_trades INTEGER,
-                losing_trades  INTEGER,
-                total_pnl      REAL,
-                largest_win    REAL,
-                largest_loss   REAL
-            )
-        """)
+    """No-op: PostgreSQL schema is managed by scripts/init_db.sql."""
+    pass
 
 
 def log_trade(
@@ -56,12 +21,27 @@ def log_trade(
     price: float,
     pnl: Optional[float] = None,
 ) -> None:
-    with _conn() as con:
-        con.execute(
-            "INSERT INTO trades (timestamp, symbol, action, quantity, price, pnl) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (datetime.now().isoformat(), symbol, action, quantity, price, pnl),
-        )
+    try:
+        from backend.database import SessionLocal
+        from backend.models import Trade
+        db = SessionLocal()
+        try:
+            trade = Trade(
+                timestamp=datetime.now().astimezone(),
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                entry_price=price if action == 'BUY' else None,
+                exit_price=price if action == 'SELL' else None,
+                pnl=pnl,
+                mode=_get_mode(),
+            )
+            db.add(trade)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[metrics] Failed to log trade to PostgreSQL: {exc}")
 
 
 def save_daily_summary(
@@ -73,21 +53,36 @@ def save_daily_summary(
     largest_win: float,
     largest_loss: float,
 ) -> None:
-    with _conn() as con:
-        con.execute(
-            """
-            INSERT INTO daily_summary
-                (date, total_trades, winning_trades, losing_trades,
-                 total_pnl, largest_win, largest_loss)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(date) DO UPDATE SET
-                total_trades   = excluded.total_trades,
-                winning_trades = excluded.winning_trades,
-                losing_trades  = excluded.losing_trades,
-                total_pnl      = excluded.total_pnl,
-                largest_win    = excluded.largest_win,
-                largest_loss   = excluded.largest_loss
-            """,
-            (date, total_trades, winning_trades, losing_trades,
-             total_pnl, largest_win, largest_loss),
-        )
+    try:
+        from backend.database import SessionLocal
+        from backend.models import DailySummary
+        from sqlalchemy.dialects.postgresql import insert
+        db = SessionLocal()
+        try:
+            stmt = insert(DailySummary).values(
+                date=datetime.strptime(date, '%Y-%m-%d').date(),
+                mode=_get_mode(),
+                total_trades=total_trades,
+                winning_trades=winning_trades,
+                losing_trades=losing_trades,
+                total_pnl=total_pnl,
+                largest_win=largest_win,
+                largest_loss=largest_loss,
+                symbols_traded=[],
+            ).on_conflict_do_update(
+                index_elements=['date'],
+                set_=dict(
+                    total_trades=total_trades,
+                    winning_trades=winning_trades,
+                    losing_trades=losing_trades,
+                    total_pnl=total_pnl,
+                    largest_win=largest_win,
+                    largest_loss=largest_loss,
+                )
+            )
+            db.execute(stmt)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[metrics] Failed to save daily summary to PostgreSQL: {exc}")
