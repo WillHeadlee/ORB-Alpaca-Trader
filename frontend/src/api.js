@@ -5,22 +5,25 @@ const API_BASE = '/api';
 class API {
   constructor() {
     this.token = localStorage.getItem('token');
-    this.client = axios.create({
-      baseURL: API_BASE,
-      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {}
+    this.client = axios.create({ baseURL: API_BASE });
+
+    // Always inject token at request time so it stays in sync
+    this.client.interceptors.request.use(config => {
+      if (this.token) {
+        config.headers.Authorization = `Bearer ${this.token}`;
+      }
+      return config;
     });
   }
 
   setToken(token) {
     this.token = token;
     localStorage.setItem('token', token);
-    this.client.defaults.headers.Authorization = `Bearer ${token}`;
   }
 
   clearToken() {
     this.token = null;
     localStorage.removeItem('token');
-    delete this.client.defaults.headers.Authorization;
   }
 
   async login(username, password) {
