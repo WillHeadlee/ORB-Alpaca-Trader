@@ -32,7 +32,7 @@ def login(username: str, password: str, db: Session = Depends(get_db)):
 @router.get("/api/dashboard/status")
 def get_status(db: Session = Depends(get_db), username: str = Depends(verify_token)):
     try:
-        result = subprocess.run(['systemctl', 'is-active', 'orb-trader'],
+        result = subprocess.run(['/usr/bin/systemctl', 'is-active', 'orb-trader'],
                                 capture_output=True, text=True)
         bot_status = 'running' if result.stdout.strip() == 'active' else 'stopped'
     except Exception:
@@ -210,7 +210,7 @@ def kill_switch(db: Session = Depends(get_db), username: str = Depends(verify_to
 @router.post("/api/trading/pause")
 def pause_trading(username: str = Depends(verify_token)):
     try:
-        subprocess.run(['systemctl', 'stop', 'orb-trader'], check=True)
+        subprocess.run(['/usr/bin/systemctl', 'stop', 'orb-trader'], check=True)
         return {"status": "paused"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -218,7 +218,7 @@ def pause_trading(username: str = Depends(verify_token)):
 @router.post("/api/trading/resume")
 def resume_trading(username: str = Depends(verify_token)):
     try:
-        subprocess.run(['systemctl', 'start', 'orb-trader'], check=True)
+        subprocess.run(['/usr/bin/systemctl', 'start', 'orb-trader'], check=True)
         return {"status": "running"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
