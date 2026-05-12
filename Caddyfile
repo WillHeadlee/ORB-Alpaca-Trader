@@ -1,15 +1,17 @@
 :80 {
-    # API endpoints — no caching
+    # API — proxy to FastAPI, no caching
     @api path /api/*
     handle @api {
         reverse_proxy localhost:8000
         header Cache-Control "no-store"
     }
 
-    # Serve static frontend files
-    root * /opt/orb-trader/frontend/dist
-    file_server
-    try_files {path} /index.html
+    # Everything else — serve React SPA
+    handle {
+        root * /opt/orb-trader/frontend/dist
+        file_server
+        try_files {path} /index.html
+    }
 
     log {
         output file /var/log/caddy/orb-trader.log
