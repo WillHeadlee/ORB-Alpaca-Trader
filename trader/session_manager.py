@@ -12,6 +12,7 @@ from trader.position_manager import PositionTracker, build_levels
 from trader.strategy import Signal, evaluate_entry, evaluate_exit
 from trader.data_feed import DataFeed
 from utils.logger import log, SessionStats, TradeRecord
+from utils.metrics import init_db, log_trade, save_daily_summary
 from utils.time_utils import (
     now_et, opening_range_end, hard_close_dt, seconds_until,
     is_market_open, wait_until_market_open,
@@ -33,6 +34,7 @@ class SessionManager:
         self._hard_closed = False
         self._feed: DataFeed | None = None
         self._volume_baselines: dict[str, float] = {}  # symbol → historical avg vol
+        init_db()
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -168,6 +170,7 @@ class SessionManager:
                     symbol=symbol, action="ENTRY", price=price,
                     shares=levels.shares, reason=result.reason,
                 ))
+                log_trade(symbol, "BUY", levels.shares, price)
                 log.info(
                     f"{symbol}: stop={levels.stop_loss:.2f}, "
                     f"target={levels.take_profit:.2f}"
@@ -200,6 +203,7 @@ class SessionManager:
                 symbol=symbol, action="EXIT", price=price,
                 shares=levels.shares, reason=result.reason, pnl=pnl,
             ))
+            log_trade(symbol, "SELL", levels.shares, price, pnl)
 
     # ------------------------------------------------------------------
     # Scheduled tasks
@@ -254,4 +258,21 @@ class SessionManager:
 
     async def _shutdown(self) -> None:
         self.stats.print_summary()
+        self._persist_daily_summary()
         log.info("Session ended")
+
+    def _persist_daily_summary(self) -> None:
+        exits = [r for r in self.stats.records if r.action == "EXIT" and r.pnl is not None]
+        pnls = [r.pnl for r in exits]
+        try:
+            save_daily_summary(
+                date=datetime.now().strftime("%Y-%m-%d"),
+                total_trades=len([r for r in self.stats.records if r.action == "ENTRY"]),
+                winning_trades=sum(1 for p in pnls if p > 0),
+                losing_trades=sum(1 for p in pnls if p < 0),
+                total_pnl=sum(pnls),
+                largest_win=max((p for p in pnls if p > 0), default=0.0),
+                largest_loss=min((p for p in pnls if p < 0), default=0.0),
+            )
+        except Exception as exc:
+            log.error(f"Failed to save daily summary to metrics DB: {exc}")

@@ -1,0 +1,19 @@
+[Unit]
+Description=Alpaca ORB Auto-Trader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/orb-trader
+Environment="PATH=/opt/orb-trader/venv/bin"
+ExecStart=/opt/orb-trader/venv/bin/python /opt/orb-trader/main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orb-trader
+
+[Install]
+WantedBy=multi-user.target

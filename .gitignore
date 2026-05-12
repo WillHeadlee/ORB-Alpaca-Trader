@@ -1,4 +1,6 @@
 .env
+metrics.db
+*.db
 __pycache__/
 *.pyc
 *.pyo

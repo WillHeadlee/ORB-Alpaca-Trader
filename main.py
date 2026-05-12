@@ -34,7 +34,11 @@ def validate_env() -> None:
 
 
 async def main() -> None:
-    load_dotenv(BASE_DIR / ".env")
+    # Try production secrets path first, fall back to local .env for dev
+    for env_path in [Path("/etc/orb-trader/.env"), BASE_DIR / ".env"]:
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
     validate_env()
 
     cfg = load_config()

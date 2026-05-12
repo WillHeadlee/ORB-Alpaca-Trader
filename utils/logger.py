@@ -1,18 +1,21 @@
-"""Trade logger — file + console, plus end-of-session daily summary."""
+"""Trade logger — rotating file + console, plus end-of-session daily summary."""
 
 import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+# Production path takes priority; falls back to repo-local logs/
+_LOG_DIR_ENV = os.getenv("ORB_LOG_DIR")
+LOG_DIR = Path(_LOG_DIR_ENV) if _LOG_DIR_ENV else Path(__file__).resolve().parent.parent / "logs"
 LOG_FILE = LOG_DIR / "trades.log"
 
 
 def _setup_logger() -> logging.Logger:
-    LOG_DIR.mkdir(exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("orb_trader")
     if logger.handlers:
         return logger
@@ -21,7 +24,12 @@ def _setup_logger() -> logging.Logger:
     fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s",
                             datefmt="%Y-%m-%d %H:%M:%S")
 
-    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    fh = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding="utf-8",
+    )
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
 
