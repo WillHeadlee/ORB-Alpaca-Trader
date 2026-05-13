@@ -117,20 +117,32 @@ class AlpacaClient:
     # ------------------------------------------------------------------
 
     def get_recent_bars(self, symbol: str, limit: int = 20):
-        """Return up to `limit` 1-minute bars for volume baseline."""
+        """Return up to `limit` daily bars for volume baseline.
+
+        Uses daily timeframe (available on free IEX subscription).
+        Each bar's volume is divided by 390 (market minutes per day)
+        to give a per-minute average comparable to 1-min breakout bars.
+        """
         from datetime import datetime, timedelta
         import pytz
 
         et = pytz.timezone("America/New_York")
         end = datetime.now(et)
-        start = end - timedelta(days=5)
+        start = end - timedelta(days=limit * 2)  # enough trading days
 
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
-            timeframe=TimeFrame.Minute,
+            timeframe=TimeFrame.Day,
             start=start,
             end=end,
             limit=limit,
         )
         bars = self._data.get_stock_bars(req)
-        return bars.get(symbol, [])
+        daily = bars.get(symbol, [])
+
+        # Wrap each bar so .volume returns the per-minute equivalent
+        class _ScaledBar:
+            def __init__(self, b):
+                self.volume = int(b.volume / 390)
+
+        return [_ScaledBar(b) for b in daily]

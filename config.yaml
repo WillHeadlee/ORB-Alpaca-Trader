@@ -15,4 +15,5 @@ strategy:
   stop_loss_pct: 0.5            # % below entry price for stop-loss
   reward_risk_ratio: 2.0        # take-profit = stop_loss_distance * ratio
   hard_close_time: "15:55"      # ET — force-close all positions at this time
+  last_entry_time: "11:30"      # ET — no new entries after this time
   volume_multiplier: 1.2        # breakout bar volume must exceed avg_volume * this

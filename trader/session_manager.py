@@ -67,6 +67,7 @@ class SessionManager:
 
         self._orb_done = False
         self._hard_closed = False
+        self._entries_closed = False  # set True after last_entry_time
         self._feed: DataFeed | None = None
         self._volume_baselines: dict[str, float] = {}  # symbol → historical avg vol
         init_db()
@@ -89,6 +90,12 @@ class SessionManager:
         hard_close = hard_close_dt(self.strategy["hard_close_time"])
         log.info(f"ORB window ends at {orb_end.strftime('%H:%M:%S')} ET")
         log.info(f"Hard close at {hard_close.strftime('%H:%M:%S')} ET")
+
+        last_entry_str = self.strategy.get("last_entry_time")
+        if last_entry_str:
+            last_entry = hard_close_dt(last_entry_str)
+            log.info(f"Last entry time: {last_entry.strftime('%H:%M:%S')} ET")
+            asyncio.create_task(self._schedule_close_entries(last_entry))
 
         self._feed = DataFeed(self.watchlist, self._on_bar)
 
@@ -166,6 +173,8 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     async def _check_entry(self, symbol: str, price: float, volume: int) -> None:
+        if self._entries_closed:
+            return
         orb = self.orb_tracker.get(symbol)
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
@@ -242,7 +251,8 @@ class SessionManager:
                 sell_order = self.client.submit_market_sell(symbol, levels.shares)
                 sell_order_id = str(sell_order.id) if sell_order else None
             except Exception as exc:
-                if "position" in str(exc).lower() or "order" in str(exc).lower():
+                err = str(exc).lower()
+                if any(k in err for k in ("position", "order", "short", "asset")):
                     log.info(f"{symbol}: position already closed by broker bracket fill")
                 else:
                     log.error(f"{symbol}: sell error — {exc}")
@@ -256,6 +266,13 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Scheduled tasks
     # ------------------------------------------------------------------
+
+    async def _schedule_close_entries(self, cutoff: datetime) -> None:
+        secs = seconds_until(cutoff)
+        log.info(f"No new entries after {cutoff.strftime('%H:%M')} ET ({secs:.0f}s)")
+        await asyncio.sleep(secs)
+        self._entries_closed = True
+        log.info("Entry window closed — holding existing positions only")
 
     async def _schedule_orb_finalise(self, orb_end: datetime) -> None:
         secs = seconds_until(orb_end)
