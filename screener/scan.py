@@ -19,7 +19,7 @@ from alpaca.data.timeframe import TimeFrame
 from backend.database import SessionLocal
 from backend.models import ScreenerResult
 
-PRICE_MIN = 20
+PRICE_MIN = 50
 PRICE_MAX = 500
 VOLUME_MIN = 150_000         # pre-filter: IEX feed ~3% of real volume (150K ≈ 5M real)
 AVG_VOLUME_MIN = 300_000     # final filter: 20-day avg (300K ≈ 10M real)

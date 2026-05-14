@@ -175,6 +175,9 @@ class SessionManager:
     async def _check_entry(self, symbol: str, price: float, volume: int) -> None:
         if self._entries_closed:
             return
+        max_pos = self.strategy.get("max_open_positions", 99)
+        if len(self.pos_tracker.open_symbols()) >= max_pos:
+            return
         orb = self.orb_tracker.get(symbol)
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
@@ -247,6 +250,7 @@ class SessionManager:
             # Bracket legs may have already closed the position at Alpaca;
             # attempt the sell but swallow "position not found" errors.
             sell_order_id = None
+            broker_closed = False
             try:
                 sell_order = self.client.submit_market_sell(symbol, levels.shares)
                 sell_order_id = str(sell_order.id) if sell_order else None
@@ -254,6 +258,7 @@ class SessionManager:
                 err = str(exc).lower()
                 if any(k in err for k in ("position", "order", "short", "asset")):
                     log.info(f"{symbol}: position already closed by broker bracket fill")
+                    broker_closed = True
                 else:
                     log.error(f"{symbol}: sell error — {exc}")
             self.pos_tracker.close(symbol)
@@ -261,7 +266,8 @@ class SessionManager:
                 symbol=symbol, action="EXIT", price=price,
                 shares=levels.shares, reason=result.reason, pnl=pnl,
             ))
-            log_trade(symbol, "SELL", levels.shares, price, pnl, order_id=sell_order_id)
+            if not broker_closed:
+                log_trade(symbol, "SELL", levels.shares, price, pnl, order_id=sell_order_id)
 
     # ------------------------------------------------------------------
     # Scheduled tasks
