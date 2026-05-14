@@ -7,7 +7,7 @@ import os
 
 SECRET_KEY = os.getenv('JWT_SECRET', 'your-secret-key-change-this')
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 security = HTTPBearer()
 

@@ -14,6 +14,18 @@ class API {
       }
       return config;
     });
+
+    // Auto-logout on 401 — clears token and reloads to login screen
+    this.client.interceptors.response.use(
+      res => res,
+      err => {
+        if (err.response?.status === 401) {
+          this.clearToken();
+          window.location.reload();
+        }
+        return Promise.reject(err);
+      }
+    );
   }
 
   setToken(token) {
