@@ -246,7 +246,7 @@ class SessionManager:
 
         # Relative strength filter — stock must be outperforming SPY since open
         if self.strategy.get("rs_filter", True) and self._spy_open and self._spy_latest:
-            stock_open = self._stock_opens.get(symbol)
+            stock_open = self._stock_opens.get(symbol, price)  # fallback: no RS signal if first bar
             if stock_open and stock_open > 0 and self._spy_open > 0:
                 stock_pct = (price - stock_open) / stock_open * 100
                 spy_pct   = (self._spy_latest - self._spy_open) / self._spy_open * 100
@@ -287,15 +287,17 @@ class SessionManager:
                 log.warning(f"{symbol}: calculated 0 shares, skipping entry")
                 return
 
-            # Daily resistance filter — skip if prev day's high sits between entry and target
+            # Daily resistance filter — skip only if prev day's high is sitting right on top
+            # of entry (within 0.25R). A stock that has already cleared its prior high is a
+            # "breakout of breakout" which is bullish — don't filter those out.
             if self.strategy.get("daily_resistance_filter", True):
                 prev_high = self._prev_day_highs.get(symbol)
                 if prev_high:
                     stop_dist = levels.entry_price - levels.stop_loss
-                    if levels.entry_price < prev_high < levels.take_profit and (prev_high - levels.entry_price) < stop_dist:
+                    if prev_high > levels.entry_price and (prev_high - levels.entry_price) < stop_dist * 0.25:
                         self.stats.record(TradeRecord(
                             symbol=symbol, action="SKIP", price=price, shares=0,
-                            reason=f"prev day high {prev_high:.2f} is resistance within 1R",
+                            reason=f"prev day high {prev_high:.2f} is immediate resistance (<0.25R away)",
                         ))
                         return
 
