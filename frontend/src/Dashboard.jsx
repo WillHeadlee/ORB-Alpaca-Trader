@@ -151,13 +151,14 @@ function Dashboard({ onLogout }) {
 
   if (loading) return <LoadingScreen />;
 
-  const running  = status?.bot_status === 'running';
-  const pnl30    = performance?.total_pnl ?? 0;
-  const todayPnl = status?.today_pnl ?? 0;
-  const winRate  = (performance?.win_rate ?? 0) * 100;
-  const balance  = status?.account_balance ?? 0;
-  const mode     = status?.mode ?? 'paper';
-  const positions = status?.positions ?? [];
+  const running      = status?.bot_status === 'running';
+  const pnl30        = performance?.total_pnl ?? 0;
+  const todayPnl     = status?.today_pnl ?? 0;
+  const winRate      = (performance?.win_rate ?? 0) * 100;
+  const balance      = status?.account_balance ?? 0;
+  const mode         = status?.mode ?? 'paper';
+  const positions    = status?.positions ?? [];
+  const unrealizedPnl = positions.reduce((sum, p) => sum + (p.unrealized_pnl ?? 0), 0);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--void)', display: 'flex', flexDirection: 'column' }}>
@@ -242,12 +243,19 @@ function Dashboard({ onLogout }) {
         {/* ── STAT CARDS ── */}
         <div key={`stats-${refreshKey}`} className="data-refresh" style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: 10,
         }}>
           <StatCard
+            label="Open P&L"
+            value={fmt(unrealizedPnl)}
+            sub={positions.length > 0 ? `${positions.length} POSITION${positions.length > 1 ? 'S' : ''}` : 'NO POSITIONS'}
+            colorClass={pnlClass(unrealizedPnl) || 'glow-cream'}
+          />
+          <StatCard
             label="Today P&L"
             value={fmt(todayPnl)}
+            sub="REALIZED"
             colorClass={pnlClass(todayPnl) || 'glow-cream'}
           />
           <StatCard
