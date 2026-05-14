@@ -75,6 +75,9 @@ class MockAlpacaClient:
     def update_stop_loss(self, stop_order_id: str, new_stop_price: float) -> bool:
         return True
 
+    def get_prev_day_highs(self, symbols: list) -> dict:
+        return {}  # no resistance filter in tests
+
     def get_open_positions(self):
         return []
 
@@ -94,7 +97,9 @@ TEST_CONFIG = {
         "hard_close_time": "15:55",
         "volume_multiplier": 1.2,
         "max_position_pct": 20.0,
-        "spy_filter": False,       # disabled in tests — no SPY bar data
+        "spy_filter": False,              # disabled in tests — no SPY bar data
+        "rs_filter": False,               # disabled in tests — no stock open tracking
+        "daily_resistance_filter": False, # disabled in tests — no prev day data
     },
 }
 

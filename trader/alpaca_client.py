@@ -129,6 +129,20 @@ class AlpacaClient:
             log.warning(f"Could not update stop loss: {exc}")
             return None
 
+    def get_prev_day_highs(self, symbols: list[str]) -> dict[str, float]:
+        """Return previous trading day's high for each symbol via batch snapshot."""
+        from alpaca.data.requests import StockSnapshotRequest
+        try:
+            snaps = self._data.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=symbols))
+            return {
+                sym: float(snap.previous_daily_bar.high)
+                for sym, snap in snaps.items()
+                if snap.previous_daily_bar and snap.previous_daily_bar.high
+            }
+        except Exception as exc:
+            log.warning(f"Could not fetch previous day highs: {exc}")
+            return {}
+
     def position_exists(self, symbol: str) -> bool:
         """Return True if a position for symbol is currently open on Alpaca.
         get_open_position raises APIError 40410000 when the position doesn't exist.

@@ -22,6 +22,8 @@ class Trade(Base):
     alpaca_order_id = Column(String(100), nullable=True)
     bracket_stop_leg_id = Column(String(100), nullable=True)
     bracket_tp_leg_id = Column(String(100), nullable=True)
+    signal_price = Column(Numeric(10, 4), nullable=True)   # bar close that triggered entry
+    slippage_bps = Column(Numeric(8, 2), nullable=True)    # (fill - signal) / signal * 10000
 
 class Position(Base):
     __tablename__ = 'positions'

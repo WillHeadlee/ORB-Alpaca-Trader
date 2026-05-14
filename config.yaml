@@ -22,3 +22,5 @@ strategy:
   spy_filter: true              # only enter when SPY is above its 9:30 open price
   stale_exit_minutes: 45        # close position if open this long without reaching min R
   stale_exit_min_r: 0.5         # minimum R profit to avoid stale close
+  rs_filter: true               # only enter if stock % change > SPY % change since open
+  daily_resistance_filter: true # skip if prev day's high sits within 1R of entry

@@ -23,6 +23,7 @@ def log_trade(
     order_id: Optional[str] = None,
     stop_leg_id: Optional[str] = None,
     tp_leg_id: Optional[str] = None,
+    signal_price: Optional[float] = None,
 ) -> None:
     try:
         from backend.database import SessionLocal
@@ -41,6 +42,7 @@ def log_trade(
                 alpaca_order_id=order_id,
                 bracket_stop_leg_id=stop_leg_id,
                 bracket_tp_leg_id=tp_leg_id,
+                signal_price=signal_price if action == 'BUY' else None,
             )
             db.add(trade)
             db.commit()

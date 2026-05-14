@@ -73,6 +73,8 @@ class SessionManager:
         self._vwap_state: dict[str, tuple[float, int]] = {}  # symbol → (cum_pv, cum_vol)
         self._spy_open: float | None = None    # SPY first bar close = 9:30 reference
         self._spy_latest: float | None = None  # SPY most recent bar close
+        self._stock_opens: dict[str, float] = {}   # symbol → first bar close (RS calc)
+        self._prev_day_highs: dict[str, float] = {}  # symbol → previous day's high
         init_db()
 
     # ------------------------------------------------------------------
@@ -87,6 +89,10 @@ class SessionManager:
 
         # Seed historical volume baseline for each symbol (uses prior-day bars)
         self._load_volume_baselines()
+
+        # Load previous day's high for daily resistance filter
+        self._prev_day_highs = self.client.get_prev_day_highs(self.watchlist)
+        log.info(f"Loaded previous day highs for {len(self._prev_day_highs)} symbols")
 
         # Compute timers *after* waking so dates are correct for today
         orb_end = opening_range_end(self.strategy["opening_range_minutes"])
@@ -166,6 +172,10 @@ class SessionManager:
         pv, vol = self._vwap_state.get(symbol, (0.0, 0))
         self._vwap_state[symbol] = (pv + typical * int(bar.volume), vol + int(bar.volume))
 
+        # Track each symbol's first bar close for relative strength calculation
+        if symbol not in self._stock_opens:
+            self._stock_opens[symbol] = float(bar.close)
+
         # Track SPY as market index reference
         if symbol == 'SPY':
             self._spy_latest = float(bar.close)
@@ -234,6 +244,19 @@ class SessionManager:
                 ))
                 return
 
+        # Relative strength filter — stock must be outperforming SPY since open
+        if self.strategy.get("rs_filter", True) and self._spy_open and self._spy_latest:
+            stock_open = self._stock_opens.get(symbol)
+            if stock_open and stock_open > 0 and self._spy_open > 0:
+                stock_pct = (price - stock_open) / stock_open * 100
+                spy_pct   = (self._spy_latest - self._spy_open) / self._spy_open * 100
+                if stock_pct <= spy_pct:
+                    self.stats.record(TradeRecord(
+                        symbol=symbol, action="SKIP", price=price, shares=0,
+                        reason=f"no RS: {symbol} {stock_pct:+.2f}% vs SPY {spy_pct:+.2f}%",
+                    ))
+                    return
+
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
         # evaluate_entry expects a multiplier, so express threshold as ratio to ORB avg
@@ -264,6 +287,18 @@ class SessionManager:
                 log.warning(f"{symbol}: calculated 0 shares, skipping entry")
                 return
 
+            # Daily resistance filter — skip if prev day's high sits between entry and target
+            if self.strategy.get("daily_resistance_filter", True):
+                prev_high = self._prev_day_highs.get(symbol)
+                if prev_high:
+                    stop_dist = levels.entry_price - levels.stop_loss
+                    if levels.entry_price < prev_high < levels.take_profit and (prev_high - levels.entry_price) < stop_dist:
+                        self.stats.record(TradeRecord(
+                            symbol=symbol, action="SKIP", price=price, shares=0,
+                            reason=f"prev day high {prev_high:.2f} is resistance within 1R",
+                        ))
+                        return
+
             order = self.client.submit_bracket_buy(
                 symbol, levels.shares, levels.take_profit, levels.stop_loss
             )
@@ -284,7 +319,7 @@ class SessionManager:
                     pass
                 levels.stop_order_id = stop_leg_id  # enable breakeven stop
                 log_trade(symbol, "BUY", levels.shares, price, order_id=str(order.id),
-                          stop_leg_id=stop_leg_id, tp_leg_id=tp_leg_id)
+                          stop_leg_id=stop_leg_id, tp_leg_id=tp_leg_id, signal_price=price)
                 log.info(
                     f"{symbol}: stop={levels.stop_loss:.2f}, "
                     f"target={levels.take_profit:.2f}"

@@ -79,6 +79,10 @@ def _sync_fills(db: Session) -> None:
                         buy.alpaca_order_id = order_id
                     if float(buy.entry_price or 0) != fill_price:
                         buy.entry_price = fill_price
+                        # Compute slippage vs signal price
+                        sig = float(buy.signal_price or 0)
+                        if sig > 0:
+                            buy.slippage_bps = round((fill_price - sig) / sig * 10000, 2)
                         # Cascade: fix PnL on linked SELL
                         sell = db.query(Trade).filter(
                             Trade.symbol == symbol,
@@ -235,6 +239,8 @@ def get_trades(
                 "exit_price": float(t.exit_price or t.entry_price or 0),
                 "pnl": float(t.pnl or 0),
                 "mode": t.mode,
+                "signal_price": float(t.signal_price) if t.signal_price else None,
+                "slippage_bps": float(t.slippage_bps) if t.slippage_bps else None,
             }
             for t in trades
         ],
