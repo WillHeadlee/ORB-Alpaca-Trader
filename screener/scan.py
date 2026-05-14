@@ -26,6 +26,17 @@ AVG_VOLUME_MIN = 300_000     # final filter: 20-day avg (300K ≈ 10M real)
 BATCH_SIZE = 1000
 TOP_N = 100
 
+# Leveraged and inverse ETFs — excluded because:
+# - Synthetic pricing causes erratic ORB ranges
+# - Stop-loss fills have high slippage vs set price
+# - OCA bracket cancellation is less reliable on these instruments
+EXCLUDED_SYMBOLS = {
+    'TQQQ', 'SQQQ', 'SOXL', 'SOXS', 'UPRO', 'SPXL', 'SPXS', 'SPXU',
+    'TECL', 'TECS', 'LABU', 'LABD', 'NAIL', 'DRN', 'TNA', 'SRTY',
+    'URTY', 'UDOW', 'SDOW', 'MIDU', 'MIDZ', 'CURE', 'DFEN', 'DUSL',
+    'BNKU', 'FAS', 'FAZ', 'BRZU', 'INDL', 'WANT', 'WEBL', 'WEBS',
+}
+
 
 def scan_top_100():
     print(f"Starting screener scan at {datetime.now()}")
@@ -42,7 +53,8 @@ def scan_top_100():
         a.symbol for a in assets
         if a.tradable and a.status == 'active'
         and a.exchange in ('NASDAQ', 'NYSE', 'ARCA')
-        and '/' not in a.symbol  # exclude crypto-style symbols
+        and '/' not in a.symbol          # exclude crypto-style symbols
+        and a.symbol not in EXCLUDED_SYMBOLS  # exclude leveraged/inverse ETFs
     ]
     print(f"Found {len(symbols)} tradable assets — fetching snapshots in batches...")
 

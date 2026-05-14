@@ -179,6 +179,11 @@ class SessionManager:
         if len(self.pos_tracker.open_symbols()) >= max_pos:
             return
         orb = self.orb_tracker.get(symbol)
+        max_range = self.strategy.get("max_range_pct", 0)
+        if max_range and orb and orb.is_set and orb.range_low > 0:
+            range_pct = (orb.range_high - orb.range_low) / orb.range_low * 100
+            if range_pct > max_range:
+                return
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
         # evaluate_entry expects a multiplier, so express threshold as ratio to ORB avg
