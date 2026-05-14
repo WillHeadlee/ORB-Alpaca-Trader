@@ -93,6 +93,19 @@ sudo -u postgres psql orb_trader -c \
 sudo -u postgres psql orb_trader -c \
   "SELECT * FROM trades WHERE timestamp::date = CURRENT_DATE ORDER BY timestamp;"
 
+# Slippage report — how much market orders cost vs signal price
+sudo -u postgres psql orb_trader -c \
+  "SELECT symbol, signal_price, entry_price AS fill_price, slippage_bps \
+   FROM trades WHERE action = 'BUY' AND slippage_bps IS NOT NULL \
+   ORDER BY timestamp DESC LIMIT 30;"
+
+# Average slippage (if consistently > 10-15 bps, switch to limit orders)
+sudo -u postgres psql orb_trader -c \
+  "SELECT ROUND(AVG(slippage_bps), 2) AS avg_slippage_bps, \
+          ROUND(MAX(slippage_bps), 2) AS max_slippage_bps, \
+          COUNT(*) AS trades \
+   FROM trades WHERE action = 'BUY' AND slippage_bps IS NOT NULL;"
+
 # Run a migration script
 sudo -u postgres psql orb_trader < /opt/orb-trader/scripts/add_order_id.sql
 ```

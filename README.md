@@ -6,21 +6,46 @@ An automated day trading bot implementing the **Opening Range Breakout (ORB)** s
 
 ## Strategy
 
-The bot observes the first 15 minutes after the 9:30 AM ET open to define an *opening range* (high and low). If price breaks above the range high with above-average volume, it enters a long position with a broker-side bracket order (stop-loss + take-profit). All positions are force-closed at 3:55 PM ET.
+The bot observes the first 15 minutes after the 9:30 AM ET open to define an *opening range* (high and low). If price breaks above the range high with sufficient volume and passes all filters, it enters a long position with a broker-side bracket order. All positions are force-closed at 3:55 PM ET.
+
+### Entry parameters
 
 | Parameter | Default | Description |
 |---|---|---|
 | Opening range | 15 min | Observation window after open |
 | Risk per trade | 1.5% | Max % of equity risked per trade |
 | Max position size | 20% | Cap on total position cost as % of equity |
-| Stop-loss | 0.5% below entry | Submitted as broker stop order |
+| Max concurrent | 3 | Max simultaneous open positions |
+| Stop-loss | 0.75% below entry | Submitted as broker stop order |
 | Take-profit | 2:1 reward/risk | Submitted as broker limit order |
-| Hard close | 3:55 PM ET | Force-closes all positions |
 | Volume filter | 1.2× avg | Breakout bar must exceed this |
+| Price floor | $50 | Screener minimum — excludes thin-book stocks |
+| ORB range cap | 2% | Skip if opening range > 2% wide (chaotic open) |
 
-The watchlist is populated each morning from the stock screener (top 20 symbols by volume × volatility score). Falls back to the `config.yaml` watchlist if no screener data exists.
+### Entry filters (applied in order)
 
-With a 2:1 reward/risk ratio, the strategy needs a win rate above ~35% to be profitable. Historical ORB win rates on liquid stocks run 45–55%.
+| Filter | Logic |
+|---|---|
+| VWAP | Price must be above session VWAP |
+| SPY index | SPY must be above its 9:30 open price |
+| Relative strength | Stock % change from open must exceed SPY % change |
+| Daily resistance | Skip if previous day's high is within 1R of entry |
+| Leveraged ETFs | Excluded from screener universe entirely |
+
+### Exit logic
+
+| Exit | Trigger |
+|---|---|
+| Stop-loss | Bracket order fires at -0.75% |
+| Take-profit | Bracket order fires at +1.5% (2:1 R:R) |
+| Breakeven stop | When position reaches 1:1 R:R, stop moved to entry price |
+| Stale exit | Close if open > 45 min and profit < 0.5R |
+| Hard close | All positions liquidated at 3:55 PM ET |
+| Last entry | No new entries after 11:30 AM ET |
+
+The watchlist is populated each morning from the stock screener (top 20 symbols by volume × volatility score, $50+ price, no leveraged ETFs). Falls back to the `config.yaml` watchlist if no screener data exists.
+
+With a 2:1 reward/risk ratio, the strategy needs a win rate above ~35% to be profitable.
 
 ---
 
