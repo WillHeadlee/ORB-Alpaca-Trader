@@ -70,6 +70,9 @@ class SessionManager:
         self._entries_closed = False  # set True after last_entry_time
         self._feed: DataFeed | None = None
         self._volume_baselines: dict[str, float] = {}  # symbol → historical avg vol
+        self._vwap_state: dict[str, tuple[float, int]] = {}  # symbol → (cum_pv, cum_vol)
+        self._spy_open: float | None = None    # SPY first bar close = 9:30 reference
+        self._spy_latest: float | None = None  # SPY most recent bar close
         init_db()
 
     # ------------------------------------------------------------------
@@ -97,7 +100,9 @@ class SessionManager:
             log.info(f"Last entry time: {last_entry.strftime('%H:%M:%S')} ET")
             asyncio.create_task(self._schedule_close_entries(last_entry))
 
-        self._feed = DataFeed(self.watchlist, self._on_bar)
+        # Always include SPY for index filter — deduplicate in case it's already in watchlist
+        feed_symbols = list(dict.fromkeys(['SPY'] + self.watchlist))
+        self._feed = DataFeed(feed_symbols, self._on_bar)
 
         # Schedule hard close
         asyncio.create_task(self._schedule_hard_close(hard_close))
@@ -139,6 +144,10 @@ class SessionManager:
     # Bar handler (called by DataFeed for every 1-min bar)
     # ------------------------------------------------------------------
 
+    def _session_vwap(self, symbol: str) -> float | None:
+        pv, vol = self._vwap_state.get(symbol, (0.0, 0))
+        return pv / vol if vol > 0 else None
+
     async def _on_bar(self, symbol: str, bar: AlpacaBar) -> None:
         if self._hard_closed:
             return
@@ -151,6 +160,21 @@ class SessionManager:
             close=float(bar.close),
             volume=int(bar.volume),
         )
+
+        # Accumulate session VWAP: typical_price × volume
+        typical = (float(bar.high) + float(bar.low) + float(bar.close)) / 3
+        pv, vol = self._vwap_state.get(symbol, (0.0, 0))
+        self._vwap_state[symbol] = (pv + typical * int(bar.volume), vol + int(bar.volume))
+
+        # Track SPY as market index reference
+        if symbol == 'SPY':
+            self._spy_latest = float(bar.close)
+            if self._spy_open is None:
+                self._spy_open = float(bar.close)
+            if symbol not in self.watchlist:
+                if not self._orb_done:
+                    self.orb_tracker.update(symbol, orb_bar)
+                return
 
         # Accumulate ORB during observation window
         if not self._orb_done:
@@ -192,6 +216,24 @@ class SessionManager:
                     reason=f"ORB range too wide ({range_pct:.2f}%)",
                 ))
                 return
+        # VWAP filter — only enter if price is above session VWAP
+        vwap = self._session_vwap(symbol)
+        if vwap and price < vwap:
+            self.stats.record(TradeRecord(
+                symbol=symbol, action="SKIP", price=price, shares=0,
+                reason=f"price {price:.2f} below VWAP {vwap:.2f}",
+            ))
+            return
+
+        # Index filter — only enter if SPY is above its 9:30 open
+        if self.strategy.get("spy_filter", True) and self._spy_open and self._spy_latest:
+            if self._spy_latest < self._spy_open:
+                self.stats.record(TradeRecord(
+                    symbol=symbol, action="SKIP", price=price, shares=0,
+                    reason=f"SPY below open ({self._spy_latest:.2f} < {self._spy_open:.2f})",
+                ))
+                return
+
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
         # evaluate_entry expects a multiplier, so express threshold as ratio to ORB avg
@@ -240,6 +282,7 @@ class SessionManager:
                             tp_leg_id = str(leg.id)
                 except Exception:
                     pass
+                levels.stop_order_id = stop_leg_id  # enable breakeven stop
                 log_trade(symbol, "BUY", levels.shares, price, order_id=str(order.id),
                           stop_leg_id=stop_leg_id, tp_leg_id=tp_leg_id)
                 log.info(
@@ -258,7 +301,31 @@ class SessionManager:
             return
         result = evaluate_exit(price, levels)
 
-        if result.signal in (Signal.EXIT_STOP, Signal.EXIT_TARGET, Signal.EXIT_HARD_CLOSE):
+        # Breakeven stop — move stop to entry once trade reaches 1:1 R:R
+        if result.signal == Signal.NONE and not levels.breakeven_set and levels.stop_order_id:
+            stop_dist = levels.entry_price - levels.stop_loss
+            if stop_dist > 0 and price >= levels.entry_price + stop_dist:
+                if self.client.update_stop_loss(levels.stop_order_id, levels.entry_price):
+                    levels.stop_loss = levels.entry_price
+                    levels.breakeven_set = True
+                    log.info(f"{symbol}: stop moved to breakeven @ {levels.entry_price:.2f}")
+
+        # Stale exit — close dead-money positions that haven't gained momentum
+        if result.signal == Signal.NONE:
+            elapsed_min = (now_et() - levels.entry_time).total_seconds() / 60
+            stop_dist = levels.entry_price - levels.stop_loss
+            if stop_dist > 0:
+                profit_r = (price - levels.entry_price) / stop_dist
+                stale_min = self.strategy.get("stale_exit_minutes", 45)
+                stale_r   = self.strategy.get("stale_exit_min_r", 0.5)
+                if elapsed_min >= stale_min and profit_r < stale_r:
+                    from trader.strategy import SignalResult
+                    result = SignalResult(
+                        Signal.EXIT_STALE,
+                        f"stale: {elapsed_min:.0f}min open, {profit_r:.2f}R profit",
+                    )
+
+        if result.signal in (Signal.EXIT_STOP, Signal.EXIT_TARGET, Signal.EXIT_HARD_CLOSE, Signal.EXIT_STALE):
             pnl = (price - levels.entry_price) * levels.shares
             # Bracket legs may have already closed the position at Alpaca;
             # attempt the sell but swallow "position not found" errors.

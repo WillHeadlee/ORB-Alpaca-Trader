@@ -19,3 +19,6 @@ strategy:
   last_entry_time: "11:30"      # ET — no new entries after this time
   volume_multiplier: 1.2        # breakout bar volume must exceed avg_volume * this
   max_range_pct: 2.0            # skip entries if ORB high-low spread > this % of price
+  spy_filter: true              # only enter when SPY is above its 9:30 open price
+  stale_exit_minutes: 45        # close position if open this long without reaching min R
+  stale_exit_min_r: 0.5         # minimum R profit to avoid stale close

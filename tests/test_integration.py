@@ -72,6 +72,9 @@ class MockAlpacaClient:
     def position_exists(self, symbol: str) -> bool:
         return True
 
+    def update_stop_loss(self, stop_order_id: str, new_stop_price: float) -> bool:
+        return True
+
     def get_open_positions(self):
         return []
 
@@ -91,6 +94,7 @@ TEST_CONFIG = {
         "hard_close_time": "15:55",
         "volume_multiplier": 1.2,
         "max_position_pct": 20.0,
+        "spy_filter": False,       # disabled in tests — no SPY bar data
     },
 }
 

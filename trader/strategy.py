@@ -14,6 +14,7 @@ class Signal(Enum):
     EXIT_STOP = auto()
     EXIT_TARGET = auto()
     EXIT_HARD_CLOSE = auto()
+    EXIT_STALE = auto()
     SKIP_BREAKDOWN = auto()
     SKIP_DUPLICATE = auto()
     SKIP_NO_RANGE = auto()

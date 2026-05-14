@@ -112,6 +112,20 @@ class AlpacaClient:
     def get_open_positions(self) -> list:
         return self._trading.get_all_positions()
 
+    def update_stop_loss(self, stop_order_id: str, new_stop_price: float) -> bool:
+        """Move a bracket stop-loss leg to a new price via Alpaca order replace API."""
+        from alpaca.trading.requests import ReplaceOrderRequest
+        try:
+            self._trading.replace_order_by_id(
+                stop_order_id,
+                ReplaceOrderRequest(stop_price=round(new_stop_price, 2)),
+            )
+            log.info(f"Stop order {stop_order_id} moved to {new_stop_price:.2f}")
+            return True
+        except Exception as exc:
+            log.warning(f"Could not update stop loss: {exc}")
+            return False
+
     def position_exists(self, symbol: str) -> bool:
         """Return True if a position for symbol is currently open on Alpaca.
         get_open_position raises APIError 40410000 when the position doesn't exist.
