@@ -177,12 +177,20 @@ class SessionManager:
             return
         max_pos = self.strategy.get("max_open_positions", 99)
         if len(self.pos_tracker.open_symbols()) >= max_pos:
+            self.stats.record(TradeRecord(
+                symbol=symbol, action="SKIP", price=price, shares=0,
+                reason=f"max_open_positions reached ({max_pos})",
+            ))
             return
         orb = self.orb_tracker.get(symbol)
         max_range = self.strategy.get("max_range_pct", 0)
         if max_range and orb and orb.is_set and orb.range_low > 0:
             range_pct = (orb.range_high - orb.range_low) / orb.range_low * 100
             if range_pct > max_range:
+                self.stats.record(TradeRecord(
+                    symbol=symbol, action="SKIP", price=price, shares=0,
+                    reason=f"ORB range too wide ({range_pct:.2f}%)",
+                ))
                 return
         # Use historical avg volume baseline; falls back to ORB-bar average
         vol_threshold = self._volume_multiplier_threshold(symbol)
