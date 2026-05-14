@@ -305,10 +305,16 @@ class SessionManager:
         if result.signal == Signal.NONE and not levels.breakeven_set and levels.stop_order_id:
             stop_dist = levels.entry_price - levels.stop_loss
             if stop_dist > 0 and price >= levels.entry_price + stop_dist:
-                if self.client.update_stop_loss(levels.stop_order_id, levels.entry_price):
+                new_id = self.client.update_stop_loss(levels.stop_order_id, levels.entry_price)
+                if new_id:
+                    levels.stop_order_id = new_id  # Alpaca replaces the order; old ID is cancelled
                     levels.stop_loss = levels.entry_price
                     levels.breakeven_set = True
                     log.info(f"{symbol}: stop moved to breakeven @ {levels.entry_price:.2f}")
+                    self.stats.record(TradeRecord(
+                        symbol=symbol, action="SKIP", price=price, shares=0,
+                        reason=f"stop moved to breakeven @ {levels.entry_price:.2f}",
+                    ))
 
         # Stale exit — close dead-money positions that haven't gained momentum
         if result.signal == Signal.NONE:

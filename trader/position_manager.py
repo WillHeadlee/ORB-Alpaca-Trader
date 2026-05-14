@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from utils.time_utils import now_et
+
 
 @dataclass
 class PositionLevels:
@@ -12,7 +14,7 @@ class PositionLevels:
     shares: int
     stop_loss: float
     take_profit: float
-    entry_time: datetime = field(default_factory=lambda: datetime.now().astimezone())
+    entry_time: datetime = field(default_factory=now_et)
     stop_order_id: Optional[str] = None  # bracket stop-loss child order ID
     breakeven_set: bool = False           # True once stop moved to entry price
 

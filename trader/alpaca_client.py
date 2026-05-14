@@ -112,19 +112,22 @@ class AlpacaClient:
     def get_open_positions(self) -> list:
         return self._trading.get_all_positions()
 
-    def update_stop_loss(self, stop_order_id: str, new_stop_price: float) -> bool:
-        """Move a bracket stop-loss leg to a new price via Alpaca order replace API."""
+    def update_stop_loss(self, stop_order_id: str, new_stop_price: float) -> Optional[str]:
+        """Move a bracket stop-loss leg to a new price via Alpaca order replace API.
+        Returns the new order ID (Alpaca cancels the old order and creates a new one),
+        or None on failure. Caller must update their stored stop_order_id.
+        """
         from alpaca.trading.requests import ReplaceOrderRequest
         try:
-            self._trading.replace_order_by_id(
+            new_order = self._trading.replace_order_by_id(
                 stop_order_id,
                 ReplaceOrderRequest(stop_price=round(new_stop_price, 2)),
             )
-            log.info(f"Stop order {stop_order_id} moved to {new_stop_price:.2f}")
-            return True
+            log.info(f"Stop order {stop_order_id} replaced → {new_order.id} @ {new_stop_price:.2f}")
+            return str(new_order.id)
         except Exception as exc:
             log.warning(f"Could not update stop loss: {exc}")
-            return False
+            return None
 
     def position_exists(self, symbol: str) -> bool:
         """Return True if a position for symbol is currently open on Alpaca.
