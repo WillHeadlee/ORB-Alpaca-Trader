@@ -69,6 +69,9 @@ class MockAlpacaClient:
         self.market_sells.append({"symbol": symbol, "qty": qty, "order_id": order.id})
         return order
 
+    def position_exists(self, symbol: str) -> bool:
+        return True
+
     def get_open_positions(self):
         return []
 

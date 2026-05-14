@@ -251,16 +251,21 @@ class SessionManager:
             # attempt the sell but swallow "position not found" errors.
             sell_order_id = None
             broker_closed = False
-            try:
-                sell_order = self.client.submit_market_sell(symbol, levels.shares)
-                sell_order_id = str(sell_order.id) if sell_order else None
-            except Exception as exc:
-                err = str(exc).lower()
-                if any(k in err for k in ("position", "order", "short", "asset")):
-                    log.info(f"{symbol}: position already closed by broker bracket fill")
-                    broker_closed = True
-                else:
-                    log.error(f"{symbol}: sell error — {exc}")
+
+            if not self.client.position_exists(symbol):
+                log.info(f"{symbol}: position already closed by broker bracket fill")
+                broker_closed = True
+            else:
+                try:
+                    sell_order = self.client.submit_market_sell(symbol, levels.shares)
+                    sell_order_id = str(sell_order.id) if sell_order else None
+                except Exception as exc:
+                    err = str(exc).lower()
+                    if any(k in err for k in ("position", "order", "short", "asset")):
+                        log.info(f"{symbol}: position already closed by broker bracket fill")
+                        broker_closed = True
+                    else:
+                        log.error(f"{symbol}: sell error — {exc}")
             self.pos_tracker.close(symbol)
             self.stats.record(TradeRecord(
                 symbol=symbol, action="EXIT", price=price,

@@ -112,6 +112,16 @@ class AlpacaClient:
     def get_open_positions(self) -> list:
         return self._trading.get_all_positions()
 
+    def position_exists(self, symbol: str) -> bool:
+        """Return True if a position for symbol is currently open on Alpaca.
+        get_open_position raises APIError 40410000 when the position doesn't exist.
+        """
+        try:
+            self._trading.get_open_position(symbol)
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------
     # Historical bars (used for average volume baseline)
     # ------------------------------------------------------------------
