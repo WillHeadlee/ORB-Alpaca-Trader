@@ -75,6 +75,7 @@ class SessionManager:
         self._spy_latest: float | None = None  # SPY most recent bar close
         self._stock_opens: dict[str, float] = {}   # symbol → first bar close (RS calc)
         self._prev_day_highs: dict[str, float] = {}  # symbol → previous day's high
+        self._daily_loss_limit: float = -float('inf')  # set in run() from session equity
         init_db()
 
     # ------------------------------------------------------------------
@@ -93,6 +94,12 @@ class SessionManager:
         # Load previous day's high for daily resistance filter
         self._prev_day_highs = self.client.get_prev_day_highs(self.watchlist)
         log.info(f"Loaded previous day highs for {len(self._prev_day_highs)} symbols")
+
+        # Pre-compute daily loss limit once — avoid calling get_equity() on every bar
+        session_equity = self.client.get_equity()
+        max_loss_pct = self.strategy.get("max_daily_loss_pct", 3.0)
+        self._daily_loss_limit = -(session_equity * max_loss_pct / 100)
+        log.info(f"Daily loss limit: ${self._daily_loss_limit:.2f} ({max_loss_pct}% of ${session_equity:,.2f})")
 
         # Compute timers *after* waking so dates are correct for today
         orb_end = opening_range_end(self.strategy["opening_range_minutes"])
@@ -209,6 +216,17 @@ class SessionManager:
     async def _check_entry(self, symbol: str, price: float, volume: int) -> None:
         if self._entries_closed:
             return
+
+        # Circuit Breaker — stop trading if daily loss limit hit
+        net_pnl = self.stats.get_net_pnl()
+        max_loss = self._daily_loss_limit
+        if net_pnl <= max_loss:
+            self.stats.record(TradeRecord(
+                symbol=symbol, action="SKIP", price=price, shares=0,
+                reason=f"max_daily_loss reached (${net_pnl:.2f} <= ${max_loss:.2f})",
+            ))
+            return
+
         max_pos = self.strategy.get("max_open_positions", 99)
         if len(self.pos_tracker.open_symbols()) >= max_pos:
             self.stats.record(TradeRecord(
@@ -258,10 +276,21 @@ class SessionManager:
                     return
 
         # Use historical avg volume baseline; falls back to ORB-bar average
-        vol_threshold = self._volume_multiplier_threshold(symbol)
+        # Use dynamic multiplier if stock has cleared previous day's high
+        prev_high = self._prev_day_highs.get(symbol, 0.0)
+        vol_mult = self.strategy["volume_multiplier"]
+        if prev_high > 0 and price > prev_high:
+            vol_mult = self.strategy.get("dynamic_volume_multiplier", 1.1)
+
+        baseline = self._volume_baselines.get(symbol)
+        if baseline:
+            vol_threshold = baseline * vol_mult
+        else:
+            vol_threshold = (orb.avg_bar_volume * vol_mult) if orb else 0.0
+
         # evaluate_entry expects a multiplier, so express threshold as ratio to ORB avg
         orb_avg = orb.avg_bar_volume if (orb and orb.avg_bar_volume > 0) else 1.0
-        effective_multiplier = vol_threshold / orb_avg if orb_avg else self.strategy["volume_multiplier"]
+        effective_multiplier = vol_threshold / orb_avg if orb_avg else vol_mult
 
         result = evaluate_entry(
             symbol=symbol,
@@ -441,6 +470,13 @@ class SessionManager:
             bp = broker_positions.get(symbol)
             price = float(bp.current_price) if bp else (levels.entry_price if levels else 0.0)
             pnl = (price - levels.entry_price) * levels.shares if levels else 0.0
+
+            # Explicitly close tracked position first (bypasses potential close_all timeout)
+            try:
+                self.client.close_position(symbol)
+            except Exception as exc:
+                log.warning(f"Could not close {symbol} individually: {exc}")
+
             self.pos_tracker.close(symbol)
             self.stats.record(TradeRecord(
                 symbol=symbol, action="EXIT", price=price,
