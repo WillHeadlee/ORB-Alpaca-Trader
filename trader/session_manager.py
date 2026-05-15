@@ -375,7 +375,13 @@ class SessionManager:
             sell_order_id = None
             broker_closed = False
 
-            if not self.client.position_exists(symbol):
+            try:
+                pos_open = self.client.position_exists(symbol)
+            except Exception as exc:
+                log.warning(f"{symbol}: position_exists check failed ({exc}) — skipping exit, will retry next bar")
+                return  # transient API error; pos_tracker unchanged; retry next bar
+
+            if not pos_open:
                 log.info(f"{symbol}: position already closed by broker bracket fill")
                 broker_closed = True
             else:
@@ -442,11 +448,21 @@ class SessionManager:
                 reason="hard close 3:55 ET", pnl=pnl,
             ))
 
-        # Single call cancels all bracket legs and liquidates everything
+        # Cancel all bracket legs and liquidate everything
         try:
             self.client.close_all_positions()
         except Exception as exc:
-            log.error(f"close_all_positions error: {exc}")
+            log.error(f"close_all_positions error: {exc} — attempting per-position fallback")
+            try:
+                open_positions = self.client.get_open_positions()
+                for pos in open_positions:
+                    try:
+                        self.client.submit_market_sell(pos.symbol, int(float(pos.qty)))
+                        log.info(f"Fallback hard close: sold {pos.symbol} {pos.qty} shares")
+                    except Exception as pos_exc:
+                        log.error(f"Fallback hard close failed for {pos.symbol}: {pos_exc}")
+            except Exception as fetch_exc:
+                log.error(f"Could not fetch positions for fallback close: {fetch_exc}")
 
         if self._feed:
             await self._feed.stop()
