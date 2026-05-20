@@ -68,6 +68,10 @@ class SessionStats:
             f"| shares={rec.shares}{pnl_str} | {rec.reason}"
         )
 
+    def get_net_pnl(self) -> float:
+        """Return the cumulative realized P&L for the current session."""
+        return sum(r.pnl for r in self.records if r.action == "EXIT" and r.pnl is not None)
+
     def print_summary(self) -> None:
         entries = [r for r in self.records if r.action == "ENTRY"]
         exits = [r for r in self.records if r.action == "EXIT" and r.pnl is not None]
